@@ -3,8 +3,7 @@
 A live tuning tool for Forza Horizon 6 on PC.
 
 Neptune connects to the running game and lets you change how your car behaves
-while you drive: torque delivery, boost, rev limit, ride height and the time of
-day.
+while you drive: torque delivery, boost, rev limit and ride height.
 
 ## Features
 
