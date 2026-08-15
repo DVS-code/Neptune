@@ -11,13 +11,13 @@ from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import Runtime
 from neptune.core.settings import Settings
 from neptune.features.boostgauge import BoostGaugeModule
+from neptune.features.dragy import DragyModule
 from neptune.features.engine import EngineModule
 from neptune.features.presets import PresetsModule
 from neptune.features.settings import SettingsModule
 from neptune.features.suspension import SuspensionModule
 from neptune.features.tunes import TunesModule
 from neptune.features.turbo import TurboModule
-from neptune.features.world import WorldModule
 from neptune.ui import theme as T
 from neptune.ui.shell import Shell
 
@@ -33,9 +33,9 @@ def build_registry(settings: Settings) -> ModuleRegistry:
     engine.bind_turbo(turbo)
 
     registry.register(SuspensionModule(settings))
+    registry.register(DragyModule(settings))
     registry.register(BoostGaugeModule(settings))
     registry.register(TunesModule(registry, settings))
-    registry.register(WorldModule(settings))
     registry.register(PresetsModule(registry, settings))
     registry.register(SettingsModule(registry, settings))
 

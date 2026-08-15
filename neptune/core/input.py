@@ -1,8 +1,16 @@
-"""Keyboard and controller input with configurable bindings."""
+"""Keyboard, controller and racing-wheel input with configurable bindings.
+
+Three binding kinds, all resolved through `is_down` so feature modules never care which:
+  'key'   — keyboard and extra mouse buttons
+  'pad'   — XInput controllers
+  'wheel' — racing wheels, via core.wheels
+"""
 from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+
+from neptune.core import wheels
 
 user32 = ctypes.WinDLL('user32')
 
@@ -94,22 +102,35 @@ def make_binding(kind: str, code: int) -> dict:
     return {'kind': kind, 'code': int(code), 'label': table.get(code, 'Unknown')}
 
 
+def source_label(binding: dict | None) -> str:
+    """The device word shown before a binding's own label."""
+    kind = (binding or {}).get('kind')
+    if kind == 'pad':
+        return 'Controller'
+    if kind == 'wheel':
+
+        return (binding or {}).get('device_name') or 'Wheel'
+    return 'Key'
+
+
 def describe(binding: dict | None) -> str:
     """Human label for a binding."""
     if not binding or not binding.get('kind'):
         return 'Not bound'
-    source = 'Controller' if binding.get('kind') == 'pad' else 'Key'
-    return f'{source} · {binding.get("label", "Unknown")}'
+    return f'{source_label(binding)} · {binding.get("label", "Unknown")}'
 
 
 def is_down(binding: dict | None) -> bool:
     if not binding:
         return False
     try:
-        if binding['kind'] == 'key':
+        kind = binding['kind']
+        if kind == 'key':
             return key_down(binding['code'])
-        if binding['kind'] == 'pad':
+        if kind == 'pad':
             return pad_down(binding['code'])
+        if kind == 'wheel':
+            return wheels.is_down(binding)
     except Exception:
         return False
     return False
@@ -143,6 +164,36 @@ def poll_any_pad() -> dict | None:
         if gamepad.wButtons & code:
             return make_binding('pad', code)
     return None
+
+
+def poll_any_wheel() -> dict | None:
+    """The racing-wheel button or hat direction currently held."""
+    try:
+        return wheels.poll_any()
+    except Exception:
+        return None
+
+
+def poll_any_input() -> dict | None:
+    """Capture from whichever device the user touches — keyboard, pad or wheel.
+
+    Keyboard first so Escape and Backspace can always clear a binding, even with a wheel attached.
+    """
+    return poll_any_key() or poll_any_pad() or poll_any_wheel()
+
+
+def wheel_connected() -> bool:
+    try:
+        return wheels.connected()
+    except Exception:
+        return False
+
+
+def wheel_names() -> list[str]:
+    try:
+        return wheels.wheel_names()
+    except Exception:
+        return []
 
 
 class EdgeDetector:

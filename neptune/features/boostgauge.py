@@ -15,7 +15,7 @@ from neptune.ui.widgets.sliderrow import SliderRow
 PREVIEW_SIZE = 168
 PREVIEW_VALUE = 12.4
 
-HINT_SHOW = 'Puts the gauge on top of the game. It follows the game window as it moves.'
+HINT_SHOW = 'Puts the gauge on top of the game. It follows the game window.'
 HINT_SIZE = 'How large the gauge is drawn.'
 HINT_POSITION = 'Unlock the gauge to drag it anywhere on the picture with the mouse.'
 HINT_LOCK = ('Locked, clicks pass straight through to the game. '

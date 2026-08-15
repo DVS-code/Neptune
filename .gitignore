@@ -14,3 +14,7 @@ data/
 .vscode/
 .idea/
 *.log
+
+# Internal development notes — not published
+docs/
+maybach audio/

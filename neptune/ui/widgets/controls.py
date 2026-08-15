@@ -33,7 +33,7 @@ class BindButton(QPushButton):
         if not self._binding or not self._binding.get('kind'):
             self.setText('Click to bind')
             return
-        source = 'Controller' if self._binding.get('kind') == 'pad' else 'Key'
+        source = inp.source_label(self._binding)
         self.setText(f'{source}  ·  {self._binding.get("label", "?")}')
 
     def _start(self) -> None:
@@ -53,7 +53,7 @@ class BindButton(QPushButton):
         if not self._listening:
             self._timer.stop()
             return
-        captured = inp.poll_any_key() or inp.poll_any_pad()
+        captured = inp.poll_any_input()
         if not captured:
             return
         if captured.get('clear'):

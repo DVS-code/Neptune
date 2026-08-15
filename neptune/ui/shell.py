@@ -304,6 +304,103 @@ class Shell(QWidget):
         except Exception:
             pass
 
+
+    def _start_update_check(self) -> None:
+        """Ask GitHub for a newer release, quietly, a moment after the window opens."""
+        if not self.settings.get('check_for_updates', True):
+            return
+        from neptune.core import updater
+
+        def landed(status, info):
+
+
+            if status != updater.UPDATE_AVAILABLE or info is None:
+                return
+            if info.version == self.settings.get('skip_update_version'):
+                return
+            QTimer.singleShot(0, lambda: self._offer_update(info))
+
+        updater.check_async(landed)
+
+    def _offer_update(self, info) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from neptune import __version__
+        from neptune.core import updater
+
+        notes = (info.notes or '').strip()
+        if len(notes) > 700:
+            notes = notes[:700].rstrip() + '…'
+
+        box = QMessageBox(self)
+        box.setWindowTitle('Update available')
+        box.setIcon(QMessageBox.Information)
+        box.setText(f'Neptune {info.version} is available.')
+        box.setInformativeText(
+            f'You are running {__version__}.\n\n'
+            + (notes if notes else 'Would you like to update now?'))
+        install = box.addButton('Update now', QMessageBox.AcceptRole)
+        box.addButton('Not now', QMessageBox.RejectRole)
+        skip = box.addButton('Skip this version', QMessageBox.DestructiveRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is skip:
+
+            self.settings.set('skip_update_version', info.version)
+            return
+        if clicked is not install:
+            return
+
+        if not updater.frozen():
+
+            QMessageBox.information(
+                self, 'Update',
+                'Neptune is running from source, so it cannot replace itself.\n'
+                'The releases page has been opened in your browser.')
+            updater.open_releases_page()
+            return
+
+        if updater.download_and_apply(info):
+            QMessageBox.information(
+                self, 'Update',
+                'Neptune will close and reopen on the new version.')
+            self.close()
+        else:
+            QMessageBox.warning(
+                self, 'Update',
+                'The update could not be installed automatically.\n'
+                'The releases page has been opened so you can download it.')
+            updater.open_releases_page()
+
+    def showEvent(self, event) -> None:
+        """Ease the window in on first paint.
+
+        ⚠️ Degrades to a plain, FULLY VISIBLE window if the animation cannot run — never leave the
+        shell stuck transparent. The fade is armed once and only on the first show, so restoring
+        from the taskbar does not replay it.
+        """
+        super().showEvent(event)
+        if getattr(self, '_faded', False):
+            return
+        self._faded = True
+        try:
+            from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+            self.setWindowOpacity(0.0)
+            fade = QPropertyAnimation(self, b'windowOpacity', self)
+            fade.setDuration(260)
+            fade.setStartValue(0.0)
+            fade.setEndValue(1.0)
+            fade.setEasingCurve(QEasingCurve.OutCubic)
+            fade.finished.connect(lambda: self.setWindowOpacity(1.0))
+            self._fade = fade
+            fade.start()
+        except Exception:
+            self.setWindowOpacity(1.0)
+
+
+        QTimer.singleShot(1500, self._start_update_check)
+
     def closeEvent(self, event) -> None:
         self._timer.stop()
         try:

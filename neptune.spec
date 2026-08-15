@@ -12,12 +12,12 @@ analysis = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=['PySide6.QtMultimedia'],
     hookspath=[],
     runtime_hooks=[],
     excludes=['tkinter', 'matplotlib', 'numpy', 'PIL', 'PySide6.QtQml',
-              'PySide6.QtQuick', 'PySide6.QtNetwork', 'PySide6.QtWebEngineCore',
-              'PySide6.Qt3DCore', 'PySide6.QtMultimedia'],
+              'PySide6.QtQuick', 'PySide6.QtWebEngineCore',
+              'PySide6.Qt3DCore'],
     noarchive=False,
 )
 

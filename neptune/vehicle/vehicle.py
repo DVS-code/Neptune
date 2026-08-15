@@ -8,7 +8,9 @@ from neptune.memory import offsets as O
 from neptune.memory.process import Process
 
 MIN_CURVE_POINTS = 2
-MAX_CURVE_POINTS = 4096
+
+
+MAX_CURVE_POINTS = 246
 ROLLING_RADIUS_M = 0.34
 NM_RPM_TO_HP = 7127.0
 
@@ -197,6 +199,32 @@ class Vehicle:
     def gear(self) -> int | None:
         return self.process.i32(self.car + O.Car.GEAR)
 
+    def _input(self, offset: int, low: float = 0.0, high: float = 1.0) -> float | None:
+        value = self.process.f32(self.car + offset)
+        if value is None or value != value:
+            return None
+        return max(low, min(high, value))
+
+    @property
+    def throttle(self) -> float | None:
+        """Throttle position, 0..1."""
+        return self._input(O.Car.THROTTLE)
+
+    @property
+    def brake(self) -> float | None:
+        """Brake pedal, 0..1."""
+        return self._input(O.Car.BRAKE)
+
+    @property
+    def steer(self) -> float | None:
+        """Steering, -1 (full left) to +1 (full right)."""
+        return self._input(O.Car.STEER, -1.0, 1.0)
+
+    @property
+    def handbrake(self) -> float | None:
+        """Handbrake, 0..1."""
+        return self._input(O.Car.HANDBRAKE)
+
     def wheel_read(self, field: int) -> list[float] | None:
         values = []
         for index in range(O.Wheels.COUNT):
@@ -219,6 +247,25 @@ class Vehicle:
 
     def set_ride_height(self, values) -> bool:
         return self.wheel_write(O.Wheels.RIDE_HEIGHT, values)
+
+    @property
+    def wheel_radius(self) -> list[float] | None:
+        """Per-wheel radius in metres. Constant for a given car and tyre fitment."""
+        return self.wheel_read(O.Wheels.RADIUS)
+
+    @property
+    def clearance(self) -> list[float] | None:
+        """Chassis clearance above the hub, per wheel — what a tuner calls ride height.
+
+        `RIDE_HEIGHT` stores hub-centre-to-ground, so it carries the wheel radius with it. Two cars
+        on the same clearance can differ by 5 cm of hub height purely from tyre size, which is why
+        an absolute offset applied to `RIDE_HEIGHT` lands differently on every car.
+        """
+        heights = self.ride_height
+        radii = self.wheel_radius
+        if not heights or not radii:
+            return None
+        return [height - radius for height, radius in zip(heights, radii)]
 
     @property
     def redline(self) -> float | None:

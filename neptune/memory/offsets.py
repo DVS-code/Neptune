@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 GAME_EXE = 'forzahorizon6.exe'
-GAME_BUILD = '403.798'
+GAME_BUILD = '420.696'
 
 RAD_TO_RPM = 9.549296
 
@@ -62,6 +62,12 @@ class Car:
     SPEED = 0x14EC
 
 
+    THROTTLE = 0x1490
+    BRAKE = 0x1494
+    STEER = 0x1498
+    HANDBRAKE = 0x14A0
+
+
 class EngineModel:
     SPEED = 0x00
     CURVE_BRANCH = 0x84
@@ -108,6 +114,9 @@ class Wheels:
     ORDER = ('FL', 'FR', 'RR', 'RL')
     RIDE_HEIGHT = 0x02E0
     DROOP_LIMIT = 0x02F0
+
+
+    RADIUS = 0x0234
     TRAVEL = 0x0018
     LOAD = 0x0050
 
@@ -127,17 +136,6 @@ class Config:
     REVERSE = -0x1D4
     NUM_GEARS = -0x1D8
     FINAL_DRIVE = -0x1DC
-
-
-class Environment:
-    GETTER_SIG = 'F3 0F 10 41 64 C3 CC CC CC CC CC CC CC CC CC CC B0 07 C3'
-    GETTER_ORIGINAL = bytes((0xF3, 0x0F, 0x10, 0x41, 0x64))
-    TIME = 0x64
-    TIME_MIRROR = 0x60
-    DIRTY_A = 0x78
-    DIRTY_B = 0x7A
-    SECONDS_PER_DAY = 86400.0
-    SECONDS_PER_HOUR = 3600.0
 
 
 ASPIRATION_KIND = {

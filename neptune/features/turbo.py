@@ -9,6 +9,8 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from neptune.core.module import FeatureModule
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
+from neptune.ui.widgets.boostmap import COLUMNS as MAP_COLUMNS
+from neptune.ui.widgets.boostmap import BoostMap, multiplier_at
 from neptune.ui.widgets.card import Banner, StatStrip, ToggleRow
 from neptune.ui.widgets.sliderrow import SliderRow
 
@@ -20,14 +22,15 @@ DEFAULT_GEARS = 6
 DEFAULT_SPOOL_RATE = 2500.0
 RAMP_RATE_PER_SECOND = 0.6
 
-HINT_MAX_BOOST = 'The most boost the turbo is allowed to make. Power rises with it automatically.'
-HINT_POWER = 'How much of the boost is turned into power.'
-HINT_TORQUE = 'How much of the boost is turned into torque. Use with Power for the biggest gains.'
+HINT_MAX_BOOST = 'The most boost the turbo can make. Power scales with it.'
+HINT_TORQUE = 'More power at the same boost pressure.'
 HINT_LOW_AIRFLOW = 'Torque scaling while off boost.'
-HINT_SPOOL_LOAD = 'How hard the turbo must work before it reaches full boost. Higher means it spins up further first.'
-HINT_MIN_BOOST = 'Holds the boost reading up to at least this much. Changes the gauge only.'
+HINT_SPOOL_LOAD = 'How hard the turbo works before full boost. Higher spins up further first.'
+HINT_MIN_BOOST = 'Floor for the boost reading. Gauge only.'
 HINT_LAG = 'Limits how fast the turbo spools. Lower is laggier.'
 HINT_BY_GEAR = 'Scale boost separately in each gear.'
+HINT_MAP = ('Boost multiplier at each engine speed. Drag to select cells, then scroll or use the '
+            'buttons. The bright outline is where the engine is now.')
 
 NOTE_SUPERCHARGED = ('This car is supercharged, so the turbo controls do nothing here. '
                      'Use the Engine tab to change its power.')
@@ -67,18 +70,48 @@ class TurboModule(FeatureModule):
         self._ramp_time: float | None = None
         self._ramp_value = 0.0
 
+        self._map_enabled = False
+        self._map_points = [1.0] * MAP_COLUMNS
+        self._map_rows = 1
+        self._map_max_rpm = 8000.0
+
         self._gear_count = DEFAULT_GEARS
         self._controls_dirty = False
         self._widgets: dict = {}
 
     def _is_tuned(self) -> bool:
         return (self._by_gear or self._min_boost_percent != 0.0
+                or self._map_is_shaped()
                 or any(abs(value - 1.0) > 1e-6 for value in self._multipliers.values()))
+
+    def _map_is_shaped(self) -> bool:
+        """True when the boost map is on AND actually bent away from flat."""
+        return self._map_enabled and any(
+            abs(value - 1.0) > 1e-6 for value in self._map_points)
 
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
+
+
+        if vehicle is None:
+            return
         self._capture_stock(vehicle)
         self._read_gear_count(vehicle)
+        self._read_rev_range(vehicle)
+
+    def _read_rev_range(self, vehicle) -> None:
+        """Set the boost map's RPM axis from this car's own rev ceiling."""
+        try:
+            top = vehicle.rev_ceiling or vehicle.redline
+        except Exception:
+            return
+        if not top or not (1000.0 <= top <= 30000.0):
+            return
+
+        top = 500.0 * math.ceil(top / 500.0)
+        if abs(top - self._map_max_rpm) > 1.0:
+            self._map_max_rpm = top
+            self._controls_dirty = True
 
     def _read_gear_count(self, vehicle) -> None:
         """How many forward gears this car has."""
@@ -93,7 +126,9 @@ class TurboModule(FeatureModule):
             self._controls_dirty = True
 
     def _capture_stock(self, vehicle) -> None:
-        if self._is_tuned():
+
+
+        if vehicle is None or self._is_tuned():
             return
         values = {field: vehicle.turbo_get(field) for field in self.FIELDS}
         ceiling = values.get('max_boost')
@@ -109,6 +144,8 @@ class TurboModule(FeatureModule):
         self._min_boost_percent = 0.0
         self._by_gear = False
         self._gear_multipliers = {gear: 1.0 for gear in range(1, MAX_GEARS + 1)}
+        self._map_points = [1.0] * MAP_COLUMNS
+        self._map_enabled = False
         self._applied_signature = None
         self._stock_valid = False
         self._controls_dirty = True
@@ -136,6 +173,8 @@ class TurboModule(FeatureModule):
         self._min_boost_percent = 0.0
         self._by_gear = False
         self._gear_multipliers = {gear: 1.0 for gear in range(1, MAX_GEARS + 1)}
+        self._map_points = [1.0] * MAP_COLUMNS
+        self._map_enabled = False
         self._applied_signature = None
         self._lag_value = None
 
@@ -145,6 +184,8 @@ class TurboModule(FeatureModule):
         self._by_gear = False
         self._lag_enabled = False
         self._gear_multipliers = {gear: 1.0 for gear in range(1, MAX_GEARS + 1)}
+        self._map_points = [1.0] * MAP_COLUMNS
+        self._map_enabled = False
         self._applied_signature = None
         self._controls_dirty = True
 
@@ -154,26 +195,48 @@ class TurboModule(FeatureModule):
         gear = vehicle.gear
         return self._gear_multipliers.get(gear, 1.0)
 
+    def _map_factor(self, vehicle) -> float:
+        """The boost map's multiplier at the engine's current RPM."""
+        if not self._map_enabled:
+            return 1.0
+        rpm = vehicle.rpm
+        if rpm is None or rpm != rpm:
+            return 1.0
+
+
+        load = None
+        if self._map_rows > 1:
+            throttle = vehicle.throttle
+            load = None if throttle is None else 1.0 - throttle
+        return multiplier_at(self._map_points, self._map_rows, rpm,
+                             self._map_max_rpm, load)
+
     def _apply(self, vehicle) -> None:
         if not self._stock_valid:
             return
         factor = self._gear_factor(vehicle)
+        mapped = self._map_factor(vehicle)
+
+
         signature = (tuple(sorted(self._multipliers.items())),
-                     round(factor, 4), round(self._min_boost_percent, 4))
+                     round(factor, 4), round(self._min_boost_percent, 4),
+                     round(mapped, 3))
         if signature == self._applied_signature:
             return
 
         stock = self.stock
         ceiling = stock.get('max_boost')
+        boost_factor = self._multipliers['max_boost'] * factor
         if ceiling is not None:
-            scaled = ceiling * self._multipliers['max_boost'] * factor
-            vehicle.turbo_set('max_boost', min(scaled, MAX_BOOST_RAW))
-        if stock.get('power_max') is not None:
-            vehicle.turbo_set('power_max',
-                              stock['power_max'] * self._multipliers['power_max'] * factor)
+            vehicle.turbo_set('max_boost', min(ceiling * boost_factor, MAX_BOOST_RAW))
+
+
         if stock.get('max_scale') is not None:
             vehicle.turbo_set('max_scale',
-                              stock['max_scale'] * self._multipliers['max_scale'] * factor)
+                              stock['max_scale'] * self._multipliers['max_scale']
+                              * boost_factor * mapped)
+
+
         if stock.get('low_airflow') is not None:
             vehicle.turbo_set('low_airflow',
                               stock['low_airflow'] * self._multipliers['low_airflow'])
@@ -189,9 +252,12 @@ class TurboModule(FeatureModule):
 
     def tick(self, vehicle) -> None:
         self.vehicle = vehicle
+        if vehicle is None:
+            return
         if not self._stock_valid:
             self._capture_stock(vehicle)
             self._read_gear_count(vehicle)
+            self._read_rev_range(vehicle)
             return
 
         live = vehicle.boost_raw
@@ -288,6 +354,51 @@ class TurboModule(FeatureModule):
         self._gear_multipliers[gear] = float(value)
         self._applied_signature = None
 
+    def _set_map_enabled(self, enabled: bool) -> None:
+        self._map_enabled = bool(enabled)
+        self._applied_signature = None
+        for key in ('map', 'map_tools', 'map_axis_row'):
+            widget = self._widgets.get(key)
+            if widget is not None:
+                widget.setVisible(bool(enabled))
+
+
+        if not enabled:
+            self._restore_scale()
+
+    def _restore_scale(self) -> None:
+        vehicle = self.vehicle
+        if vehicle is None or not self._stock_valid:
+            return
+        base = self.stock.get('max_scale')
+        if base is not None:
+            vehicle.turbo_set('max_scale', base * self._multipliers['max_scale'])
+
+    def _set_map_axis(self, label: str) -> None:
+        """Switch the table between a 1D RPM row and a 2D RPM x throttle grid."""
+        rows = 4 if label.startswith('RPM x') else 1
+        widget = self._widgets.get('map')
+        if widget is not None:
+            widget.set_rows(rows)
+            self._map_points = widget.flat()
+        self._map_rows = rows
+        self._applied_signature = None
+
+    def _on_map_changed(self) -> None:
+        widget = self._widgets.get('map')
+        if widget is not None:
+            self._map_points = widget.flat()
+            self._map_rows = widget.rows()
+        self._applied_signature = None
+
+    def _flatten_map(self) -> None:
+        self._map_points = [1.0] * (MAP_COLUMNS * self._map_rows)
+        widget = self._widgets.get('map')
+        if widget is not None:
+            widget.flatten()
+        self._applied_signature = None
+        self._restore_scale()
+
     def _set_lag_enabled(self, enabled: bool) -> None:
         self._lag_enabled = bool(enabled)
         self._lag_value = None
@@ -297,7 +408,7 @@ class TurboModule(FeatureModule):
 
     def _sync_controls(self) -> None:
         mapping = {
-            'max_boost': 'max_boost', 'power': 'power_max',
+            'max_boost': 'max_boost',
             'torque': 'max_scale', 'low_airflow': 'low_airflow',
             'spool_load': 'turbine_limit',
         }
@@ -318,6 +429,24 @@ class TurboModule(FeatureModule):
             lag_rate.set_value(self._lag_rate)
             lag_rate.set_enabled(self._lag_enabled)
 
+        map_widget = self._widgets.get('map')
+        if map_widget is not None:
+            map_widget.set_flat(self._map_points, self._map_rows)
+            map_widget.set_max_rpm(self._map_max_rpm)
+            map_widget.setVisible(self._map_enabled)
+        map_toggle = self._widgets.get('map_toggle')
+        if map_toggle is not None:
+            map_toggle.set_value(self._map_enabled)
+        tools = self._widgets.get('map_tools')
+        if tools is not None:
+            tools.setVisible(self._map_enabled)
+        axis_row = self._widgets.get('map_axis_row')
+        if axis_row is not None:
+            axis_row.setVisible(self._map_enabled)
+        axis = self._widgets.get('map_axis')
+        if axis is not None:
+            axis.set_value('RPM x throttle' if self._map_rows > 1 else 'RPM only')
+
         by_gear = self._widgets.get('by_gear')
         if by_gear is not None:
             by_gear.set_value(self._by_gear)
@@ -332,8 +461,7 @@ class TurboModule(FeatureModule):
         boost_card = page.add_card('Boost')
         specs = [
             ('max_boost', 'Max boost', 'max_boost', 0.5, 8.0, HINT_MAX_BOOST),
-            ('power', 'Power', 'power_max', 0.5, 8.0, HINT_POWER),
-            ('torque', 'Torque', 'max_scale', 0.5, 8.0, HINT_TORQUE),
+            ('torque', 'Extra torque', 'max_scale', 0.5, 8.0, HINT_TORQUE),
             ('low_airflow', 'Off-boost torque', 'low_airflow', 0.25, 4.0, HINT_LOW_AIRFLOW),
         ]
         for widget_key, label, field, low, high, hint in specs:
@@ -371,6 +499,53 @@ class TurboModule(FeatureModule):
         lag_rate.set_enabled(False)
         self._widgets['lag_rate'] = lag_rate
         spool_card.add(lag_rate)
+
+        map_card = page.add_card('Boost map', HINT_MAP)
+        map_toggle = ToggleRow('Use the boost map', False)
+        map_toggle.toggle.toggled_value.connect(self._set_map_enabled)
+        self._widgets['map_toggle'] = map_toggle
+        map_card.add(map_toggle)
+
+        from neptune.ui.widgets.card import FieldRow as _FieldRow
+        from neptune.ui.widgets.controls import Segmented as _Segmented
+        axis = _Segmented(['RPM only', 'RPM x throttle'], 'RPM only')
+        axis.changed.connect(self._set_map_axis)
+        self._widgets['map_axis'] = axis
+        self._widgets['map_axis_row'] = _FieldRow('Table', axis)
+        self._widgets['map_axis_row'].setVisible(False)
+        map_card.add(self._widgets['map_axis_row'])
+
+        boost_map = BoostMap()
+        boost_map.changed.connect(self._on_map_changed)
+        boost_map.setVisible(False)
+        self._widgets['map'] = boost_map
+        map_card.add(boost_map)
+
+
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtWidgets import QHBoxLayout as _HBox
+        from PySide6.QtWidgets import QPushButton, QWidget as _Widget
+        tools = _Widget()
+        row = _HBox(tools)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        operations = (
+            ('-5%', lambda: boost_map.scale_selection(0.95), 'Take 5% off the selection'),
+            ('+5%', lambda: boost_map.scale_selection(1.05), 'Add 5% to the selection'),
+            ('Interpolate', boost_map.interpolate_selection,
+             'Straight-line fill between the ends of the selection'),
+            ('Smooth', boost_map.smooth_selection, 'Average out spikes in the selection'),
+            ('Flatten', self._flatten_map, 'Put the whole table back to 1.00x'),
+        )
+        for label, handler, tip in operations:
+            button = QPushButton(label)
+            button.setCursor(_Qt.PointingHandCursor)
+            button.setToolTip(tip)
+            button.clicked.connect(handler)
+            row.addWidget(button)
+        tools.setVisible(False)
+        self._widgets['map_tools'] = tools
+        map_card.add(tools)
 
         gear_card = page.add_card('Boost by gear', HINT_BY_GEAR)
         by_gear = ToggleRow('Enable boost by gear', False)
@@ -457,6 +632,14 @@ class TurboModule(FeatureModule):
                       self.settings.format_pressure(O.boost_to_gauge(ceiling))
                       if ceiling else '--', unit='')
 
+        map_widget = self._widgets.get('map')
+        if map_widget is not None and self._map_enabled:
+            load = None
+            if self._map_rows > 1:
+                throttle = vehicle.throttle
+                load = None if throttle is None else 1.0 - throttle
+            map_widget.set_live(vehicle.rpm, load)
+
         turbine = vehicle.turbine
         stats.set('turbine', f'{turbine:.0f}' if turbine is not None else '--', unit='')
         stats.set('type', O.aspiration_label(vehicle.aspiration, ceiling, turbine_limit,
@@ -478,13 +661,31 @@ class TurboModule(FeatureModule):
             'gear_multipliers': {str(k): v for k, v in self._gear_multipliers.items()},
             'lag_enabled': self._lag_enabled,
             'lag_rate': self._lag_rate,
+            'map_enabled': self._map_enabled,
+            'map_points': list(self._map_points),
+            'map_rows': self._map_rows,
         }
 
     def load_state(self, data: dict) -> None:
         data = data or {}
+
+
         for key, value in (data.get('multipliers') or {}).items():
-            if key in self._multipliers:
-                self._multipliers[key] = float(value)
+            if key not in self._multipliers:
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number != number or number in (float('inf'), float('-inf')):
+                continue
+            self._multipliers[key] = max(0.0, min(16.0, number))
+
+
+        legacy_power = float((data.get('multipliers') or {}).get('power_max', 1.0))
+        if abs(legacy_power - 1.0) > 1e-6:
+            self._multipliers['max_scale'] *= legacy_power
+        self._multipliers['power_max'] = 1.0
 
         self._min_boost_percent = float(data.get('min_boost_percent', 0.0))
         self._by_gear = bool(data.get('by_gear', False))
@@ -496,5 +697,25 @@ class TurboModule(FeatureModule):
 
         self._lag_enabled = bool(data.get('lag_enabled', False))
         self._lag_rate = float(data.get('lag_rate', DEFAULT_SPOOL_RATE))
+
+        self._map_enabled = bool(data.get('map_enabled', False))
+        try:
+            self._map_rows = max(1, min(6, int(data.get('map_rows', 1))))
+        except (TypeError, ValueError):
+            self._map_rows = 1
+        stored = data.get('map_points')
+        if isinstance(stored, (list, tuple)) and stored:
+            points = []
+            for index in range(MAP_COLUMNS * self._map_rows):
+                try:
+                    value = float(stored[index]) if index < len(stored) else 1.0
+                except (TypeError, ValueError):
+                    value = 1.0
+                if value != value:
+                    value = 1.0
+                points.append(max(0.0, min(4.0, value)))
+            self._map_points = points
+        else:
+            self._map_points = [1.0] * MAP_COLUMNS
         self._applied_signature = None
         self._sync_controls()

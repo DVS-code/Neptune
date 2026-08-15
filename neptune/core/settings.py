@@ -20,6 +20,14 @@ DEFAULTS = {
     'atmospheric_psi': O.ATMOSPHERIC_PSI_DEFAULT,
     'auto_attach': True,
     'restore_on_exit': True,
+
+
+    'airride_volume': 70,
+    'maybach_volume': 70,
+    'check_for_updates': True,
+
+
+    'skip_update_version': '',
     'bindings': {},
 }
 

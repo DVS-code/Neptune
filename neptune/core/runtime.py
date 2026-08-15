@@ -141,6 +141,14 @@ class Runtime:
 
         self.registry.dispatch('tick', self.vehicle)
 
+    def _car_was_lost(self) -> bool:
+        """True when the vehicle actually went away and has now come back.
+
+        Distinguishes a genuine reload (respawn, fast travel, a race start) from the car simply
+        still being there on the next rescan. Only the former should re-apply held state.
+        """
+        return self._identity_lost_at > 0.0
+
     def _acquire(self) -> None:
         """Find the player's car and tell the modules what changed."""
         if not self.process:
@@ -172,7 +180,11 @@ class Runtime:
             return
 
         if identity == previous:
-            self.registry.dispatch('on_car_reloaded', vehicle)
+
+
+            if self._car_was_lost():
+                self._identity_lost_at = 0.0
+                self.registry.dispatch('on_car_reloaded', vehicle)
             self._set_status(STATE_READY, 'Car ready')
             return
 

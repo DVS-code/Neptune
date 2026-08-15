@@ -30,9 +30,9 @@ CUT_MS = 30
 LIFT_MS = 30
 
 HINT_TORQUE = 'Multiplies engine torque across the whole rev range.'
-HINT_REV = 'Where the car limits and changes up. Lowering always works; raising is capped by how much the engine can pull.'
+HINT_REV = 'Where the car limits and shifts up. Raising is capped by what the engine can pull.'
 HINT_ANTILAG = 'Hold the bound control to sit on the limiter and build boost. Release to launch.'
-HINT_SPEED_CAP = 'Anti-lag releases once the car passes this speed, so it behaves like a launch control.'
+HINT_SPEED_CAP = 'Anti-lag releases past this speed, like a launch control.'
 
 
 def _contiguous_runs(pending: dict[int, float]) -> list[tuple[int, list[float]]]:
@@ -70,6 +70,9 @@ class EngineModule(FeatureModule):
         self._engaged = False
         self._ready = False
         self._cut = False
+
+
+        self._wall_tail_written = False
         self._phase_started = 0.0
         self._hold_rpm = 4000
         self._build_boost = True
@@ -98,6 +101,10 @@ class EngineModule(FeatureModule):
     def on_attach(self, vehicle) -> None:
         """Capture stock values. Never touches widgets: this runs off the interface thread."""
         self.vehicle = vehicle
+
+
+        if vehicle is None:
+            return
         self.stock_curve = vehicle.curve()
         if self._rev_limit is None:
             self.stock_ceiling = vehicle.rev_ceiling
@@ -154,7 +161,9 @@ class EngineModule(FeatureModule):
 
     def tick(self, vehicle) -> None:
         self.vehicle = vehicle
-        if not self.stock_curve:
+
+
+        if vehicle is None or not self.stock_curve:
             return
 
         if self._rev_limit is not None and not self._engaged:
@@ -255,8 +264,18 @@ class EngineModule(FeatureModule):
         lifted = max(4, min(int(round((self._hold_rpm + BOUNCE_BAND) / per_index)),
                             count - 2))
         edge = base if engaged else lifted
-        tail = list(curve[base:edge]) + [self._limiter_value()] * (count - 1 - edge)
-        vehicle.set_curve_from(base, tail)
+        limiter = self._limiter_value()
+
+
+        if not self._wall_tail_written:
+            tail = [limiter] * (count - 1 - lifted)
+            if tail:
+                vehicle.set_curve_from(lifted, tail)
+            self._wall_tail_written = True
+
+        band = list(curve[base:edge]) + [limiter] * (lifted - edge)
+        if band:
+            vehicle.set_curve_from(base, band)
         self._cut = engaged
 
     def _apply_curve(self) -> None:
@@ -265,6 +284,9 @@ class EngineModule(FeatureModule):
             return
         body = [value * self._torque_multiplier for value in self.stock_curve[:-1]]
         vehicle.set_curve(body + [self.stock_curve[-1]])
+
+
+        self._wall_tail_written = False
 
     def _apply_rev_limit(self) -> None:
         vehicle = self.vehicle
@@ -295,6 +317,8 @@ class EngineModule(FeatureModule):
 
     def _on_hold_rpm(self, value: float) -> None:
         self._hold_rpm = int(value)
+
+        self._wall_tail_written = False
 
     def _on_speed_cap(self, value: float) -> None:
         self._speed_cap_ms = self.settings.speed_to_ms(value)
@@ -493,7 +517,26 @@ class EngineModule(FeatureModule):
     def load_state(self, data: dict) -> None:
         data = data or {}
 
-        self._hold_rpm = int(data.get('hold_rpm', 4000))
+        def _number(key, fallback, low=None, high=None):
+            """Read a number defensively.
+
+            ⚠️ A hand-edited or corrupt preset can hold a string, None, NaN or infinity. Bare
+            `int()`/`float()` raise on those and abort the load half-way, leaving the module in a
+            mixed state. Every field falls back to its default and clamps to its own rail instead.
+            """
+            try:
+                value = float(data.get(key, fallback))
+            except (TypeError, ValueError):
+                return fallback
+            if value != value or value in (float('inf'), float('-inf')):
+                return fallback
+            if low is not None:
+                value = max(low, value)
+            if high is not None:
+                value = min(high, value)
+            return value
+
+        self._hold_rpm = int(_number('hold_rpm', 4000, HOLD_MIN, HOLD_MAX))
         hold = self._widgets.get('hold')
         if hold is not None:
             hold.set_value(self._hold_rpm)
@@ -504,7 +547,7 @@ class EngineModule(FeatureModule):
             boost_toggle.set_value(self._build_boost)
 
         self._speed_cap_enabled = bool(data.get('speed_cap_enabled', False))
-        self._speed_cap_ms = float(data.get('speed_cap_ms', 40.0 / 3.6))
+        self._speed_cap_ms = _number('speed_cap_ms', 40.0 / 3.6, 0.0, 200.0)
         self._over_cap = False
         cap_toggle = self._widgets.get('speed_cap_toggle')
         if cap_toggle is not None:
@@ -516,10 +559,11 @@ class EngineModule(FeatureModule):
             cap.set_enabled(self._speed_cap_enabled)
 
         rev_limit = data.get('rev_limit')
-        self._rev_limit = float(rev_limit) if rev_limit else None
+        self._rev_limit = (_number('rev_limit', None, REV_MIN, REV_MAX)
+                           if rev_limit else None)
         self._sync_rev_slider()
 
-        multiplier = float(data.get('torque', 1.0))
+        multiplier = _number('torque', 1.0, TORQUE_MIN, TORQUE_MAX)
         torque = self._widgets.get('torque')
         if torque is not None:
             torque.set_value(multiplier)

@@ -250,12 +250,21 @@ class GameWindowTracker:
 
     def anchor(self, relative_x: float, relative_y: float,
                width: int, height: int) -> tuple[int, int] | None:
-        """Map a position inside the game's area to screen coordinates."""
+        """Map a position inside the game's area to screen coordinates.
+
+        ⚠️ The fraction is measured against the DRAGGABLE SPAN (`width - overlay_width`), not the
+        full width, because that is what `GaugeOverlay._store_position` divides by. Using the full
+        width here scaled every saved position up, so the clamp below pinned the gauge to the right
+        and bottom edges — the "gauge sticks to the side of the screen" bug. The two functions must
+        use the same units or the round-trip drifts.
+        """
         bounds = self.rect
         if not bounds.valid:
             return None
-        x = int(bounds.x + relative_x * bounds.width)
-        y = int(bounds.y + relative_y * bounds.height)
+        span_x = max(0, bounds.width - width)
+        span_y = max(0, bounds.height - height)
+        x = int(bounds.x + relative_x * span_x)
+        y = int(bounds.y + relative_y * span_y)
         x = max(bounds.x, min(x, bounds.x + bounds.width - width))
         y = max(bounds.y, min(y, bounds.y + bounds.height - height))
         return x, y

@@ -11,16 +11,16 @@ day.
 | Tab | What it does |
 |---|---|
 | **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, and hold anti-lag on a key to build boost off the line. |
-| **Turbo** | Boost ceiling, how much of that boost becomes power and torque, spool behaviour, synthetic lag and per-gear boost. |
-| **Suspension** | Set ride height per axle, and drop the car on a key press with a smooth ramp. |
+| **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, and a boost map you can shape per engine speed. |
+| **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp. |
 | **Boost Gauge** | A floating boost gauge on top of the game, as a dial, a digital readout or a bar. |
+| **Dragy** | Time your car between two speeds, with an on-screen timer and recent runs. |
 | **Tunes** | Save your engine and turbo setup per car and switch between saved tunes with one key while driving. |
-| **World** | Change the time of day, and hold it there. |
 | **Presets** | Save and reload whole setups. |
 | **Settings** | Units, display and startup behaviour. |
 
 Anti-lag, air ride and tune switching can each be bound to a key or a
-controller button, on their own tab.
+controller button or a racing-wheel button, on their own tab.
 
 ## Download
 
