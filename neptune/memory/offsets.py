@@ -96,6 +96,11 @@ class Turbo:
     FIELDS = ('low_airflow', 'max_scale', 'power_max',
               'turbine_limit', 'min_boost', 'max_boost')
 
+    # The six fields are contiguous, in FIELDS order, from LOW_AIRFLOW. That lets the
+    # whole block be read in one call instead of six — see `Vehicle.turbo_block`.
+    BLOCK = LOW_AIRFLOW
+    BLOCK_COUNT = len(FIELDS)
+
     @classmethod
     def offset(cls, name: str) -> int | None:
         return getattr(cls, name.upper(), None) if name in cls.FIELDS else None
@@ -123,6 +128,28 @@ class Wheels:
     @classmethod
     def addr(cls, car: int, wheel: int, field: int) -> int:
         return car + cls.BASE + wheel * cls.STRIDE + field
+
+
+class CarConfig:
+    """The car's customization record, reached from the entity.
+
+    Read-only in Neptune: this is where the car's identity is read from. Strings are MSVC
+    small-string-optimised — a 16-byte buffer, then the length and the capacity as 8-byte
+    fields — so a reader must respect the length rather than scanning for a NUL.
+
+    The record also holds the number plate (`+0x40`), the livery and the installed-parts
+    array. Those are documented in docs/CAR_CONFIG_RECORD.md but are not addressed here,
+    because nothing in the tool writes this record any more.
+    """
+
+    ENTITY_TO_RECORD = 0x2F0
+
+    MEDIA_NAME = 0x00
+    LIVERY = 0x20
+    CAR_ID = 0x8C
+
+    STRING_CAPACITY = 15
+    STRING_LENGTH = 0x10
 
 
 class Config:

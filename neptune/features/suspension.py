@@ -15,11 +15,6 @@ RAMP_HZ = 60
 DEFAULT_RAMP_SECONDS = 2.5
 SETTLE_SECONDS = 0.5
 
-MAX_DROP_M = 0.25
-LOWER_RANGE_M = 0.20
-RAISE_RANGE_M = 0.05
-
-
 LOWER_PERCENT_MAX = 90.0
 RAISE_PERCENT_MAX = 50.0
 DROP_PERCENT_DEFAULT = 60.0
@@ -35,9 +30,10 @@ BOUNCE_SPEED_MAX = 4.0
 BOUNCE_DEFAULT_SPEED = 1.0
 BOUNCE_HZ = 60
 
-DEFAULT_FLOOR_M = 0.05
+# The last absolute limit left: a wheel may never sit closer than this to the hub line,
+# whatever percentage the user asks for. Everything else moved to percentages of the car's
+# own stock clearance, which is what made lowering behave the same across cars.
 HARD_FLOOR_M = 0.01
-FLOOR_CEILING_M = 0.30
 
 AXLE_OVERLAP = 0.7
 FRONT_WHEELS = (0, 1)
@@ -379,8 +375,12 @@ class SuspensionModule(FeatureModule):
                 if phase > 2.0 * math.pi:
                     phase -= 2.0 * math.pi
                 fraction = (1.0 - math.cos(phase)) * 0.5
-                height = self._clamp(low + (high - low) * fraction)
-                if not self._write([height] * WHEEL_COUNT):
+                target = low + (high - low) * fraction
+                # Clamp per wheel. Every wheel has its own radius and its own stock
+                # clearance, so one shared clamp (which used wheel 0's) pushed the other
+                # axle through its own floor — centimetres on a staggered fitment.
+                heights = [self._clamp(target, wheel) for wheel in range(WHEEL_COUNT)]
+                if not self._write(heights):
                     return
                 time.sleep(interval)
         except Exception:
@@ -510,7 +510,7 @@ class SuspensionModule(FeatureModule):
         toggle_button.clicked.connect(self.toggle)
         air_card.add(toggle_button)
 
-        bind_button = BindButton(self.binding())
+        bind_button = BindButton(self.binding(), settings=self.settings, key='suspension.airride')
         bind_button.bound.connect(
             lambda binding: self.settings.set_binding('suspension.airride', binding))
         self._widgets['bind'] = bind_button

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from neptune.core import carnames
 from neptune.core import input as inp
 from neptune.core import maps as store
 from neptune.core.module import FeatureModule
@@ -22,7 +23,6 @@ INACTIVE_MARK = '○'
 
 HINT_CYCLE = 'Switches to your next saved tune for this car without leaving the game.'
 NOTE_NO_CAR = 'Drive out into the world and Neptune will pick up your car.'
-NOTE_UNNAMED = 'Give this car a name so you can tell its tunes apart.'
 
 
 class TunesModule(FeatureModule):
@@ -59,12 +59,25 @@ class TunesModule(FeatureModule):
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
         self._key = store.car_key(vehicle.fingerprint()) if vehicle else None
+        self._adopt_name(vehicle)
         self._dirty = True
 
     def on_car_changed(self, vehicle) -> None:
         self.vehicle = vehicle
         self._key = store.car_key(vehicle.fingerprint()) if vehicle else None
+        self._adopt_name(vehicle)
         self._dirty = True
+
+    def _adopt_name(self, vehicle) -> None:
+        """Name the car from the game's own record, so nobody has to type one.
+
+        Only fills a blank: a name the user chose themselves is never overwritten.
+        """
+        if vehicle is None or not self._key or self.store.car_name(self._key):
+            return
+        name = carnames.pretty(vehicle.media_name)
+        if name:
+            self.store.set_car_name(self._key, name)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -192,7 +205,8 @@ class TunesModule(FeatureModule):
 
     def build_page(self, page) -> None:
         car_card = page.add_card(
-            'This car', 'Tunes are saved against the car you are driving.')
+            'This car',
+            'Named from the game. Rename it if you want your own label.')
 
         car_label = QLabel('No car detected')
         car_label.setObjectName('StatValue')
@@ -202,7 +216,7 @@ class TunesModule(FeatureModule):
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
         car_name = QLineEdit()
-        car_name.setPlaceholderText('Name this car')
+        car_name.setPlaceholderText('Rename this car')
         car_name.returnPressed.connect(self._on_name_car)
         self._widgets['car_name'] = car_name
         name_row.addWidget(car_name, 1)
@@ -214,7 +228,10 @@ class TunesModule(FeatureModule):
         car_card.add_layout(name_row)
 
         save_card = page.add_card(
-            'Save current setup', 'Captures the Engine and Turbo tabs as they are now.')
+            'Save current setup',
+            'Captures both tabs in full: torque, rev limit, launch and speed cap from '
+            'Engine, and every boost setting from Turbo — including boost by gear and '
+            'the boost map.')
         save_row = QHBoxLayout()
         save_row.setSpacing(8)
 
@@ -261,7 +278,7 @@ class TunesModule(FeatureModule):
         list_card.add_layout(actions)
 
         cycle_card = page.add_card('Switch while driving')
-        bind_button = BindButton(self.binding())
+        bind_button = BindButton(self.binding(), settings=self.settings, key='tunes.cycle')
         bind_button.bound.connect(
             lambda binding: self.settings.set_binding('tunes.cycle', binding))
         self._widgets['bind'] = bind_button
@@ -291,6 +308,8 @@ class TunesModule(FeatureModule):
             return
 
         name = self.store.car_name(self._key)
+        if not name and self.vehicle is not None:
+            name = carnames.pretty(self.vehicle.media_name)
         car_label.setText(name or 'Unnamed car')
 
         current = listing.currentRow()
@@ -306,8 +325,6 @@ class TunesModule(FeatureModule):
         if banner is not None:
             if self._message:
                 banner.set(self._message, 'ok' if self._message_ok else 'error')
-            elif not name:
-                banner.set(NOTE_UNNAMED, 'info')
             elif listing.count() == 0:
                 banner.set('Set up the Engine and Turbo tabs, then save that as a tune.',
                            'info')

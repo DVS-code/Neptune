@@ -4,8 +4,15 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QColor, QConicalGradient, QFont, QPainter, QPainterPath,
-                           QPen, QRadialGradient)
+from PySide6.QtGui import (
+    QColor,
+    QConicalGradient,
+    QFont,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QRadialGradient,
+)
 from PySide6.QtWidgets import QWidget
 
 ACCENTS = {

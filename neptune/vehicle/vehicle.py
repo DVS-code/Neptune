@@ -153,8 +153,11 @@ class Vehicle:
 
     @property
     def blower_ceiling(self) -> float | None:
-        values = [self.process.f32(self.car + offset)
-                  for offset in O.Supercharger.CEILINGS]
+        # The two ceilings are adjacent, so one read covers both.
+        values = self.process.f32_array(self.car + O.Supercharger.CEILING_A, 2)
+        if not values:
+            values = [self.process.f32(self.car + offset)
+                      for offset in O.Supercharger.CEILINGS]
         values = [value for value in values if value is not None]
         return max(values) if values else None
 
@@ -186,6 +189,18 @@ class Vehicle:
     def turbo_get(self, field: str) -> float | None:
         offset = O.Turbo.offset(field)
         return self.process.f32(self.car + offset) if offset is not None else None
+
+    def turbo_block(self) -> dict[str, float | None]:
+        """Every turbo field in one read.
+
+        The six fields are contiguous, so a caller that wants more than one of them
+        should use this rather than calling `turbo_get` per field. Falls back to
+        per-field reads if the block read fails, so a partial result is still possible.
+        """
+        values = self.process.f32_array(self.car + O.Turbo.BLOCK, O.Turbo.BLOCK_COUNT)
+        if len(values) == O.Turbo.BLOCK_COUNT:
+            return dict(zip(O.Turbo.FIELDS, values, strict=True))
+        return {field: self.turbo_get(field) for field in O.Turbo.FIELDS}
 
     def turbo_set(self, field: str, value: float) -> bool:
         offset = O.Turbo.offset(field)
@@ -263,9 +278,41 @@ class Vehicle:
         """
         heights = self.ride_height
         radii = self.wheel_radius
-        if not heights or not radii:
+        if not heights or not radii or len(heights) != len(radii):
+            # A short list here would silently become "fewer wheels" to the suspension
+            # floor maths rather than an error, so mismatched reads are refused outright.
             return None
-        return [height - radius for height, radius in zip(heights, radii)]
+        return [height - radius
+                for height, radius in zip(heights, radii, strict=True)]
+
+    def _sso_read(self, address: int) -> str | None:
+        """Read one small-string-optimised std::string."""
+        raw = self.process.read(address, 16)
+        if raw is None:
+            return None
+        length = self.process.read(address + O.CarConfig.STRING_LENGTH, 8)
+        if length is None:
+            return None
+        count = struct.unpack('<Q', length)[0]
+        if count > O.CarConfig.STRING_CAPACITY:
+            return None
+        try:
+            return raw[:count].decode('ascii')
+        except UnicodeDecodeError:
+            return None
+
+    @property
+    def car_config(self) -> int | None:
+        """The customization record: identity, livery, wheels and fitted parts."""
+        return self.process.pointer(self.entity + O.CarConfig.ENTITY_TO_RECORD)
+
+    @property
+    def media_name(self) -> str | None:
+        """The car's internal name, e.g. ALF_Giulia_16."""
+        record = self.car_config
+        if not record:
+            return None
+        return self._sso_read(record + O.CarConfig.MEDIA_NAME)
 
     @property
     def redline(self) -> float | None:
@@ -299,36 +346,47 @@ class Vehicle:
     def gear_count(self) -> int | None:
         return self.process.i32(self.config + O.Config.NUM_GEARS)
 
-    def peak_torque(self) -> tuple[float, int]:
-        """(Nm, rpm) at the current curve's peak."""
-        curve = self.curve()
-        scale = self.torque_scale
-        if len(curve) < 2 or not scale:
-            return (0.0, 0)
-        body = curve[:-1]
-        peak = max(body)
-        reference = max(abs(value) for value in body) or 1.0
-        per_index = self.rpm_per_index or 100.0
-        return (peak / reference * scale, int(body.index(peak) * per_index))
+    def peaks(self, curve=None) -> tuple[tuple[float, int], tuple[float, int]]:
+        """((peak Nm, rpm), (peak hp, rpm)) from one pass over the curve.
 
-    def peak_power(self) -> tuple[float, int]:
-        """(hp, rpm) at the current curve's peak power."""
-        curve = self.curve()
+        Pass a curve that has already been read to avoid re-reading it. The interface
+        refreshes these several times a second alongside the graph, and reading the
+        array once for all three is the difference between one memory read per refresh
+        and three.
+        """
+        if curve is None:
+            curve = self.curve()
         scale = self.torque_scale
         if len(curve) < 2 or not scale:
-            return (0.0, 0)
+            return ((0.0, 0), (0.0, 0))
+
         body = curve[:-1]
         reference = max(abs(value) for value in body) or 1.0
         per_index = self.rpm_per_index or 100.0
+
+        best_nm = 0.0
+        best_nm_rpm = 0
         best_hp = 0.0
-        best_rpm = 0
+        best_hp_rpm = 0
         for index, value in enumerate(body):
             rpm = index * per_index
-            hp = (value / reference * scale) * rpm / NM_RPM_TO_HP
+            nm = value / reference * scale
+            if index == 0 or nm > best_nm:
+                best_nm = nm
+                best_nm_rpm = int(rpm)
+            hp = nm * rpm / NM_RPM_TO_HP
             if hp > best_hp:
                 best_hp = hp
-                best_rpm = int(rpm)
-        return (best_hp, best_rpm)
+                best_hp_rpm = int(rpm)
+        return ((best_nm, best_nm_rpm), (best_hp, best_hp_rpm))
+
+    def peak_torque(self, curve=None) -> tuple[float, int]:
+        """(Nm, rpm) at the current curve's peak."""
+        return self.peaks(curve)[0]
+
+    def peak_power(self, curve=None) -> tuple[float, int]:
+        """(hp, rpm) at the current curve's peak power."""
+        return self.peaks(curve)[1]
 
     def speed_at_ceiling(self, gear_index: int) -> float:
         """Road speed in km/h at the rev ceiling in the given gear."""

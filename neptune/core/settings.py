@@ -32,6 +32,20 @@ DEFAULTS = {
 }
 
 
+def _same_control(left: dict | None, right: dict | None) -> bool:
+    """True when two bindings are the same physical control.
+
+    Only the kind and the code identify a control; the label is display text that can
+    differ between builds for the same button.
+    """
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if not left.get('kind') or not right.get('kind'):
+        return False
+    return (left.get('kind') == right.get('kind')
+            and left.get('code') == right.get('code'))
+
+
 class Settings:
     """Application settings, persisted as one JSON document."""
 
@@ -53,8 +67,32 @@ class Settings:
                             self._data[key] = value
             except (OSError, ValueError):
                 self._data = dict(DEFAULTS)
+            self._drop_duplicate_bindings()
         O.set_atmospheric_psi(self._data.get('atmospheric_psi',
                                              O.ATMOSPHERIC_PSI_DEFAULT))
+
+    def _drop_duplicate_bindings(self) -> None:
+        """Enforce one-control-one-feature on settings written before that rule existed.
+
+        Without this an upgrading user keeps a duplicate until they rebind something, and
+        one press would fire both features. The first key wins so the result is stable
+        rather than dependent on dict order.
+        """
+        stored = self._data.get('bindings')
+        if not isinstance(stored, dict):
+            return
+        kept: dict[str, dict] = {}
+        claimed: list[dict] = []
+        for key in sorted(stored):
+            binding = stored[key]
+            if not isinstance(binding, dict) or not binding.get('kind'):
+                continue
+            if any(_same_control(binding, taken) for taken in claimed):
+                continue
+            claimed.append(binding)
+            kept[key] = binding
+        if kept != stored:
+            self._data['bindings'] = kept
 
     def save(self) -> bool:
         with self._lock:
@@ -87,15 +125,34 @@ class Settings:
         return None
 
     def set_binding(self, key: str, binding: dict | None) -> None:
+        """Assign a control to `key`, taking it from anything else that held it.
+
+        A control can only drive one feature. Sharing one would fire both at once —
+        an air-ride drop and a scramble burst from the same press — so the previous
+        owner is unassigned rather than silently left to double-fire.
+        """
         with self._lock:
             stored = dict(self._data.get('bindings') or {})
             if binding and isinstance(binding, dict) and 'kind' in binding:
+                for other, existing in list(stored.items()):
+                    if other != key and _same_control(existing, binding):
+                        stored.pop(other, None)
                 stored[key] = binding
             else:
                 stored.pop(key, None)
             self._data['bindings'] = stored
         self.save()
         self._notify('bindings')
+
+    def binding_owner(self, binding: dict | None) -> str | None:
+        """Which key currently holds this control, if any."""
+        if not binding:
+            return None
+        stored = self.get('bindings', {}) or {}
+        for key, existing in stored.items():
+            if _same_control(existing, binding):
+                return key
+        return None
 
     def subscribe(self, callback) -> None:
         self._listeners.append(callback)

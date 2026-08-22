@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from neptune.ui import theme as T
+from neptune.ui.widgets.helpmark import HelpMark
 from neptune.ui.widgets.toggle import Toggle
 
 
@@ -20,19 +21,19 @@ class Card(QFrame):
         outer.setSpacing(0)
 
         if title:
-            head = QVBoxLayout()
+            # The caption rides on a help mark beside the title rather than sitting under
+            # it as a block of grey text, so a card is one line tall until asked.
+            head = QHBoxLayout()
             head.setContentsMargins(0, 0, 0, 0)
-            head.setSpacing(2)
+            head.setSpacing(7)
 
             title_label = QLabel(title)
             title_label.setObjectName('CardTitle')
             head.addWidget(title_label)
 
-            if caption:
-                caption_label = QLabel(caption)
-                caption_label.setObjectName('CardCaption')
-                caption_label.setWordWrap(True)
-                head.addWidget(caption_label)
+            self._help = HelpMark(caption)
+            head.addWidget(self._help)
+            head.addStretch(1)
 
             outer.addLayout(head)
             outer.addSpacing(14)
@@ -71,17 +72,14 @@ class ToggleRow(QWidget):
         self._label = QLabel(label)
         self._label.setObjectName('RowLabel')
         row.addWidget(self._label)
+
+        self._help = HelpMark(hint)
+        row.addWidget(self._help)
         row.addStretch(1)
 
         self.toggle = Toggle(checked)
         row.addWidget(self.toggle)
         outer.addLayout(row)
-
-        if hint:
-            hint_label = QLabel(hint)
-            hint_label.setObjectName('RowHint')
-            hint_label.setWordWrap(True)
-            outer.addWidget(hint_label)
 
     def value(self) -> bool:
         return self.toggle.isChecked()
@@ -105,15 +103,12 @@ class FieldRow(QWidget):
         self._label = QLabel(label)
         self._label.setObjectName('RowLabel')
         row.addWidget(self._label)
+
+        self._help = HelpMark(hint)
+        row.addWidget(self._help)
         row.addStretch(1)
         row.addWidget(widget)
         outer.addLayout(row)
-
-        if hint:
-            hint_label = QLabel(hint)
-            hint_label.setObjectName('RowHint')
-            hint_label.setWordWrap(True)
-            outer.addWidget(hint_label)
 
 
 class Stat(QWidget):

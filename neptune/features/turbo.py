@@ -6,15 +6,25 @@ import time
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.boostmap import COLUMNS as MAP_COLUMNS
 from neptune.ui.widgets.boostmap import BoostMap, multiplier_at
-from neptune.ui.widgets.card import Banner, StatStrip, ToggleRow
+from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
+from neptune.ui.widgets.controls import BindButton
 from neptune.ui.widgets.sliderrow import SliderRow
 
 MAX_BOOST_RAW = 900.0
+MAX_MULTIPLIER = 16.0
+
+SCRAMBLE_GAIN = 25.0
+SCRAMBLE_SECONDS = 5.0
+SCRAMBLE_MIN_GAIN = 1.0
+SCRAMBLE_MAX_GAIN = 100.0
+SCRAMBLE_MIN_SECONDS = 1.0
+SCRAMBLE_MAX_SECONDS = 30.0
 STOCK_BOOST_RANGE = (0.5, 400.0)
 MAX_GEARS = 10
 DEFAULT_GEARS = 6
@@ -29,6 +39,9 @@ HINT_SPOOL_LOAD = 'How hard the turbo works before full boost. Higher spins up f
 HINT_MIN_BOOST = 'Floor for the boost reading. Gauge only.'
 HINT_LAG = 'Limits how fast the turbo spools. Lower is laggier.'
 HINT_BY_GEAR = 'Scale boost separately in each gear.'
+HINT_SCRAMBLE = 'A burst of extra boost on a key press, then back to normal.'
+HINT_SCRAMBLE_GAIN = 'How much extra boost the burst gives.'
+HINT_SCRAMBLE_TIME = 'How long the burst lasts.'
 HINT_MAP = ('Boost multiplier at each engine speed. Drag to select cells, then scroll or use the '
             'buttons. The bright outline is where the engine is now.')
 
@@ -63,6 +76,13 @@ class TurboModule(FeatureModule):
         self._applied_signature = None
         self._blower_peak = -999.0
 
+        self._scramble_enabled = False
+        self._scramble_gain = SCRAMBLE_GAIN
+        self._scramble_seconds = SCRAMBLE_SECONDS
+        self._scramble_until = 0.0
+        self._scramble_edge = inp.EdgeDetector()
+        self._scramble_was_active = False
+
         self._lag_enabled = False
         self._lag_rate = DEFAULT_SPOOL_RATE
         self._lag_value: float | None = None
@@ -80,8 +100,11 @@ class TurboModule(FeatureModule):
         self._widgets: dict = {}
 
     def _is_tuned(self) -> bool:
+        # A running burst counts as tuned, otherwise scramble would do nothing on a car
+        # whose other settings are all stock — which is exactly how it is likely to be used.
         return (self._by_gear or self._min_boost_percent != 0.0
                 or self._map_is_shaped()
+                or self.scramble_active
                 or any(abs(value - 1.0) > 1e-6 for value in self._multipliers.values()))
 
     def _map_is_shaped(self) -> bool:
@@ -130,7 +153,7 @@ class TurboModule(FeatureModule):
 
         if vehicle is None or self._is_tuned():
             return
-        values = {field: vehicle.turbo_get(field) for field in self.FIELDS}
+        values = vehicle.turbo_block()
         ceiling = values.get('max_boost')
         if ceiling is None or not (STOCK_BOOST_RANGE[0] <= ceiling <= STOCK_BOOST_RANGE[1]):
             return
@@ -162,6 +185,20 @@ class TurboModule(FeatureModule):
         self.vehicle = None
         self._lag_value = None
 
+    def _write_stock(self, vehicle) -> None:
+        """Put the car's own boost values back, leaving the user's settings alone.
+
+        `restore()` also resets every control to neutral, which is wrong when a scramble
+        burst simply ran out — the user has not asked to undo their tune.
+        """
+        if vehicle is None or not self._stock_valid:
+            return
+        for field in self.FIELDS:
+            value = self.stock.get(field)
+            if value is not None:
+                vehicle.turbo_set(field, value)
+        self._applied_signature = None
+
     def restore(self) -> None:
         vehicle = self.vehicle
         if vehicle is not None and self._stock_valid:
@@ -177,6 +214,9 @@ class TurboModule(FeatureModule):
         self._map_enabled = False
         self._applied_signature = None
         self._lag_value = None
+        self._scramble_until = 0.0
+        self._scramble_was_active = False
+        self._scramble_edge.reset()
 
     def reset_controls(self) -> None:
         self._multipliers = {key: 1.0 for key in self._multipliers}
@@ -188,6 +228,39 @@ class TurboModule(FeatureModule):
         self._map_enabled = False
         self._applied_signature = None
         self._controls_dirty = True
+
+    def binding(self) -> dict | None:
+        return self.settings.binding('turbo.scramble')
+
+    def bindings(self) -> list[dict]:
+        return [{
+            'key': 'turbo.scramble',
+            'label': 'Scramble boost',
+            'description': 'A burst of extra boost for a few seconds, on a press.',
+        }]
+
+    def _scramble_factor(self) -> float:
+        """The multiplier the burst is contributing right now, 1.0 when it is not running."""
+        if not self._scramble_enabled or not self._scramble_until:
+            return 1.0
+        if time.monotonic() >= self._scramble_until:
+            self._scramble_until = 0.0
+            return 1.0
+        return 1.0 + self._scramble_gain / 100.0
+
+    @property
+    def scramble_active(self) -> bool:
+        return self._scramble_factor() > 1.0
+
+    def scramble_remaining(self) -> float:
+        if not self._scramble_until:
+            return 0.0
+        return max(0.0, self._scramble_until - time.monotonic())
+
+    def fire_scramble(self) -> None:
+        """Start (or restart) the burst."""
+        if self._scramble_enabled:
+            self._scramble_until = time.monotonic() + self._scramble_seconds
 
     def _gear_factor(self, vehicle) -> float:
         if not self._by_gear:
@@ -214,11 +287,21 @@ class TurboModule(FeatureModule):
     def _apply(self, vehicle) -> None:
         if not self._stock_valid:
             return
-        factor = self._gear_factor(vehicle)
+        # Scramble multiplies the same factor the by-gear table uses, so it reaches
+        # max_scale — the only boost lever proven to affect physics. Folding it into the
+        # signature below is what makes the burst start and stop: without it the settings
+        # look unchanged and _apply would skip the write entirely.
+        factor = self._gear_factor(vehicle) * self._scramble_factor()
         mapped = self._map_factor(vehicle)
 
 
-        signature = (tuple(sorted(self._multipliers.items())),
+        # The car object is part of the signature. Teleporting or editing the tune
+        # reallocates the car and the game re-bakes stock boost, but the settings are
+        # unchanged — so a settings-only signature matched, this returned early, and the
+        # boost was never re-applied. That is the "boost stops working after I teleport
+        # or tune" report: nothing had gone wrong except that we skipped the write.
+        signature = (vehicle.car,
+                     tuple(sorted(self._multipliers.items())),
                      round(factor, 4), round(self._min_boost_percent, 4),
                      round(mapped, 3))
         if signature == self._applied_signature:
@@ -260,6 +343,17 @@ class TurboModule(FeatureModule):
             self._read_rev_range(vehicle)
             return
 
+        if self._scramble_enabled and self._scramble_edge.pressed(self.binding()):
+            self.fire_scramble()
+
+        # When a burst ends on a car with no other tuning, `_is_tuned` goes false and
+        # `_apply` stops running — which would leave the boosted values written to the
+        # game. Put stock back at the moment the burst expires.
+        was_boosting = self._scramble_was_active
+        self._scramble_was_active = self.scramble_active
+        if was_boosting and not self._scramble_was_active and not self._is_tuned():
+            self._write_stock(vehicle)
+
         live = vehicle.boost_raw
         if self._is_tuned() and live is not None:
             if math.isnan(live) or math.isinf(live) or live < -1.0:
@@ -267,10 +361,33 @@ class TurboModule(FeatureModule):
                 return
 
         if self._is_tuned():
+            self._forget_if_rebaked(vehicle)
             self._apply(vehicle)
 
         if self._lag_enabled:
             self._limit_spool(vehicle)
+
+    def _forget_if_rebaked(self, vehicle) -> None:
+        """Re-apply when the game has quietly put stock boost back.
+
+        A teleport or a tune edit re-bakes the car. When that happens at the same address
+        the settings signature still matches, so `_apply` would skip the write and the
+        boost would stay stock until something else changed. Comparing the live ceiling
+        against what we last wrote catches it — the game resets it, we notice, we re-apply.
+        """
+        if not self._stock_valid or self._applied_signature is None:
+            return
+        stock_ceiling = self.stock.get('max_boost')
+        live_ceiling = vehicle.turbo_get('max_boost')
+        if stock_ceiling is None or live_ceiling is None:
+            return
+        # Must include the scramble factor, or a running burst reads as "the game reset
+        # our boost" and this would clear the signature on every tick of the burst.
+        expected = min(stock_ceiling * self._multipliers['max_boost']
+                       * self._gear_factor(vehicle) * self._scramble_factor(),
+                       MAX_BOOST_RAW)
+        if abs(live_ceiling - expected) > max(0.01, expected * 0.01):
+            self._applied_signature = None
 
     def _limit_spool(self, vehicle) -> None:
         now = time.monotonic()
@@ -343,12 +460,38 @@ class TurboModule(FeatureModule):
         self._min_boost_percent = float(value)
         self._applied_signature = None
 
+    def _set_scramble(self, enabled: bool) -> None:
+        self._scramble_enabled = bool(enabled)
+        panel = self._widgets.get('scramble_panel')
+        if panel is not None:
+            panel.setVisible(self._scramble_enabled)
+        if not self._scramble_enabled:
+            self._scramble_until = 0.0
+            self._scramble_edge.reset()
+
+    def _set_scramble_gain(self, value: float) -> None:
+        self._scramble_gain = max(SCRAMBLE_MIN_GAIN,
+                                  min(SCRAMBLE_MAX_GAIN, float(value)))
+
+    def _set_scramble_seconds(self, value: float) -> None:
+        self._scramble_seconds = max(SCRAMBLE_MIN_SECONDS,
+                                     min(SCRAMBLE_MAX_SECONDS, float(value)))
+
     def _set_by_gear(self, enabled: bool) -> None:
         self._by_gear = bool(enabled)
         self._applied_signature = None
         panel = self._widgets.get('gear_panel')
         if panel is not None:
+            # Show only the gears this car has before revealing the panel. The rows are
+            # built hidden (see `build_page`), so without this every car would show all
+            # ten the first time the switch is turned on.
+            self._sync_gear_visibility()
             panel.setVisible(bool(enabled))
+
+    def _sync_gear_visibility(self) -> None:
+        """Show one row per forward gear this car actually has."""
+        for gear, slider in (self._widgets.get('gear_sliders') or {}).items():
+            slider.setVisible(gear <= self._gear_count)
 
     def _set_gear_multiplier(self, gear: int, value: float) -> None:
         self._gear_multipliers[gear] = float(value)
@@ -421,6 +564,19 @@ class TurboModule(FeatureModule):
         if min_boost is not None:
             min_boost.set_value(self._min_boost_percent)
 
+        scramble = self._widgets.get('scramble')
+        if scramble is not None:
+            scramble.set_value(self._scramble_enabled)
+        gain = self._widgets.get('scramble_gain')
+        if gain is not None:
+            gain.set_value(self._scramble_gain)
+        seconds = self._widgets.get('scramble_seconds')
+        if seconds is not None:
+            seconds.set_value(self._scramble_seconds)
+        panel = self._widgets.get('scramble_panel')
+        if panel is not None:
+            panel.setVisible(self._scramble_enabled)
+
         lag_toggle = self._widgets.get('lag_toggle')
         if lag_toggle is not None:
             lag_toggle.set_value(self._lag_enabled)
@@ -455,7 +611,7 @@ class TurboModule(FeatureModule):
             panel.setVisible(self._by_gear)
         for gear, slider in (self._widgets.get('gear_sliders') or {}).items():
             slider.set_value(self._gear_multipliers.get(gear, 1.0))
-            slider.setVisible(gear <= self._gear_count)
+        self._sync_gear_visibility()
 
     def build_page(self, page) -> None:
         boost_card = page.add_card('Boost')
@@ -524,7 +680,8 @@ class TurboModule(FeatureModule):
 
         from PySide6.QtCore import Qt as _Qt
         from PySide6.QtWidgets import QHBoxLayout as _HBox
-        from PySide6.QtWidgets import QPushButton, QWidget as _Widget
+        from PySide6.QtWidgets import QPushButton
+        from PySide6.QtWidgets import QWidget as _Widget
         tools = _Widget()
         row = _HBox(tools)
         row.setContentsMargins(0, 0, 0, 0)
@@ -554,6 +711,13 @@ class TurboModule(FeatureModule):
         gear_card.add(by_gear)
 
         panel = QWidget()
+        # Hidden BEFORE its children are built. Hiding the panel first means the ten
+        # per-gear rows are added to something already invisible, so Qt does no layout or
+        # visibility work for any of them — measured at ~10 ms per setVisible call on a
+        # live widget, which was most of this page's build time. The per-slider visibility
+        # below is then redundant at build time and is applied by `_sync_controls` when
+        # the panel is actually shown.
+        panel.setVisible(False)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(12)
@@ -563,17 +727,51 @@ class TurboModule(FeatureModule):
                                decimals=2, unit='x')
             slider.changed.connect(
                 lambda value, index=gear: self._set_gear_multiplier(index, value))
-            slider.setVisible(gear <= self._gear_count)
             gear_sliders[gear] = slider
             panel_layout.addWidget(slider)
-        panel.setVisible(False)
         self._widgets['gear_panel'] = panel
         self._widgets['gear_sliders'] = gear_sliders
         gear_card.add(panel)
 
+        scramble_card = page.add_card('Scramble', HINT_SCRAMBLE)
+        scramble = ToggleRow('Enable scramble', False)
+        scramble.toggle.toggled_value.connect(self._set_scramble)
+        self._widgets['scramble'] = scramble
+        scramble_card.add(scramble)
+
+        scramble_panel = QWidget()
+        scramble_panel.setVisible(False)   # hidden first, so its rows cost no layout work
+        scramble_layout = QVBoxLayout(scramble_panel)
+        scramble_layout.setContentsMargins(0, 0, 0, 0)
+        scramble_layout.setSpacing(12)
+
+        gain = SliderRow('Extra boost', SCRAMBLE_MIN_GAIN, SCRAMBLE_MAX_GAIN,
+                         SCRAMBLE_GAIN, step=5, decimals=0, unit='%',
+                         hint=HINT_SCRAMBLE_GAIN)
+        gain.changed.connect(self._set_scramble_gain)
+        self._widgets['scramble_gain'] = gain
+        scramble_layout.addWidget(gain)
+
+        seconds = SliderRow('For', SCRAMBLE_MIN_SECONDS, SCRAMBLE_MAX_SECONDS,
+                            SCRAMBLE_SECONDS, step=0.5, decimals=1, unit='s',
+                            hint=HINT_SCRAMBLE_TIME)
+        seconds.changed.connect(self._set_scramble_seconds)
+        self._widgets['scramble_seconds'] = seconds
+        scramble_layout.addWidget(seconds)
+
+        bind = BindButton(self.binding(), settings=self.settings, key='turbo.scramble')
+        bind.bound.connect(
+            lambda binding: self.settings.set_binding('turbo.scramble', binding))
+        self._widgets['scramble_bind'] = bind
+        scramble_layout.addWidget(FieldRow('Control', bind))
+
+        self._widgets['scramble_panel'] = scramble_panel
+        scramble_card.add(scramble_panel)
+
         live_card = page.add_card('Live')
         stats = StatStrip()
         stats.add('boost', 'Boost', '--')
+        stats.add('scramble', 'Scramble', '--')
         stats.add('ceiling', 'Ceiling', '--')
         stats.add('turbine', 'Turbine', '--')
         stats.add('type', 'Induction', '--')
@@ -601,8 +799,9 @@ class TurboModule(FeatureModule):
                 banner.setVisible(False)
             return
 
-        ceiling = vehicle.turbo_get('max_boost')
-        turbine_limit = vehicle.turbo_get('turbine_limit')
+        live = vehicle.turbo_block()
+        ceiling = live.get('max_boost')
+        turbine_limit = live.get('turbine_limit')
 
         blower_live = vehicle.boost_raw_blower
         if blower_live is not None and blower_live > self._blower_peak:
@@ -631,6 +830,15 @@ class TurboModule(FeatureModule):
             stats.set('ceiling',
                       self.settings.format_pressure(O.boost_to_gauge(ceiling))
                       if ceiling else '--', unit='')
+
+        if not self._scramble_enabled:
+            stats.set('scramble', '--', T.TEXT_FAINT, unit='')
+        else:
+            remaining = self.scramble_remaining()
+            if remaining > 0.0:
+                stats.set('scramble', f'{remaining:.1f}', T.ACCENT_BRIGHT, unit='s')
+            else:
+                stats.set('scramble', 'Ready', unit='')
 
         map_widget = self._widgets.get('map')
         if map_widget is not None and self._map_enabled:
@@ -664,6 +872,9 @@ class TurboModule(FeatureModule):
             'map_enabled': self._map_enabled,
             'map_points': list(self._map_points),
             'map_rows': self._map_rows,
+            'scramble_enabled': self._scramble_enabled,
+            'scramble_gain': self._scramble_gain,
+            'scramble_seconds': self._scramble_seconds,
         }
 
     def load_state(self, data: dict) -> None:
@@ -679,12 +890,17 @@ class TurboModule(FeatureModule):
                 continue
             if number != number or number in (float('inf'), float('-inf')):
                 continue
-            self._multipliers[key] = max(0.0, min(16.0, number))
+            self._multipliers[key] = max(0.0, min(MAX_MULTIPLIER, number))
 
 
+        # Old presets stored a separate power_max multiplier, which is inert on this build
+        # (see the boost RE notes), so its effect is folded into max_scale. The result has
+        # to be re-clamped: the loop above bounds each stored value on its own, and folding
+        # two clamped values together escaped the ceiling — 16 x 16 wrote 256x to the game.
         legacy_power = float((data.get('multipliers') or {}).get('power_max', 1.0))
         if abs(legacy_power - 1.0) > 1e-6:
-            self._multipliers['max_scale'] *= legacy_power
+            self._multipliers['max_scale'] = max(
+                0.0, min(MAX_MULTIPLIER, self._multipliers['max_scale'] * legacy_power))
         self._multipliers['power_max'] = 1.0
 
         self._min_boost_percent = float(data.get('min_boost_percent', 0.0))
@@ -717,5 +933,22 @@ class TurboModule(FeatureModule):
             self._map_points = points
         else:
             self._map_points = [1.0] * MAP_COLUMNS
+
+        self._scramble_enabled = bool(data.get('scramble_enabled', False))
+        try:
+            self._scramble_gain = max(SCRAMBLE_MIN_GAIN, min(
+                SCRAMBLE_MAX_GAIN, float(data.get('scramble_gain', SCRAMBLE_GAIN))))
+        except (TypeError, ValueError):
+            self._scramble_gain = SCRAMBLE_GAIN
+        try:
+            self._scramble_seconds = max(SCRAMBLE_MIN_SECONDS, min(
+                SCRAMBLE_MAX_SECONDS,
+                float(data.get('scramble_seconds', SCRAMBLE_SECONDS))))
+        except (TypeError, ValueError):
+            self._scramble_seconds = SCRAMBLE_SECONDS
+        # A loaded tune must never arrive mid-burst.
+        self._scramble_until = 0.0
+        self._scramble_was_active = False
+
         self._applied_signature = None
         self._sync_controls()

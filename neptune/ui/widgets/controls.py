@@ -12,10 +12,18 @@ class BindButton(QPushButton):
 
     bound = Signal(object)
 
-    def __init__(self, binding: dict | None = None, parent=None):
+    def __init__(self, binding: dict | None = None, parent=None,
+                 settings=None, key: str = ''):
         super().__init__(parent)
         self._binding = binding
         self._listening = False
+        # Given the settings and its own key, the button keeps itself honest: when a
+        # control is reassigned to another feature this one is unassigned there, and
+        # without this the losing page would still show the binding it no longer owns.
+        self._settings = settings
+        self._key = key
+        if settings is not None and key:
+            settings.subscribe(self._on_settings_changed)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumWidth(190)
         self._timer = QTimer(self)
@@ -62,6 +70,14 @@ class BindButton(QPushButton):
             self._binding = captured
         self._stop()
         self.bound.emit(self._binding)
+
+    def _on_settings_changed(self, key: str) -> None:
+        if key != 'bindings' or self._settings is None or not self._key:
+            return
+        current = self._settings.binding(self._key)
+        if current != self._binding:
+            self._binding = current
+            self._render()
 
     def binding(self) -> dict | None:
         return self._binding

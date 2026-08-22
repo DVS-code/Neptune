@@ -12,6 +12,10 @@ import threading
 
 from neptune.core import paths
 
+# Modules whose save_state/load_state a tune carries. Everything those two return is
+# captured, so Turbo's boost-by-gear tables and boost map travel with the tune without
+# needing to be listed here — but a NEW tunable module must be added to this tuple or its
+# settings are silently dropped from every tune.
 TUNED_MODULES = ('engine', 'turbo')
 
 MAX_NAME_LENGTH = 40

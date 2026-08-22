@@ -17,7 +17,7 @@ onto the owning thread with a queued invocation rather than touching the player 
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, QMetaObject, QUrl, Slot
+from PySide6.QtCore import QMetaObject, QObject, Qt, QUrl, Slot
 
 from neptune.core import paths
 

@@ -5,8 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton
 
 from neptune.core.module import FeatureModule
-from neptune.ui.overlay import (DEFAULT_POSITION, DEFAULT_SIZE, MAX_SIZE,
-                                MIN_SIZE, GaugeOverlay)
+from neptune.ui.overlay import DEFAULT_POSITION, DEFAULT_SIZE, MAX_SIZE, MIN_SIZE, GaugeOverlay
 from neptune.ui.widgets.card import Banner, FieldRow, ToggleRow
 from neptune.ui.widgets.controls import Segmented
 from neptune.ui.widgets.gaugeface import ACCENT_ORDER, MODES, GaugeFace
@@ -299,14 +298,37 @@ class BoostGaugeModule(FeatureModule):
         }
 
     def load_state(self, data: dict) -> None:
+        """Apply a saved gauge setup.
+
+        ⚠️ A preset is a file on disk, so every field is untrusted. A bare `int()` on a
+        hand-edited `size` used to raise and abandon the load part-way, leaving the gauge
+        with some settings applied and the rest stale. Every field falls back to its
+        default instead — the same rule the engine and suspension pages already follow.
+        """
         data = data or {}
-        self._mode = data.get('mode', 'Dial')
-        self._accent = data.get('accent', 'blue')
-        self._size = int(data.get('size', DEFAULT_SIZE))
+
+        mode = data.get('mode', 'Dial')
+        self._mode = mode if mode in MODES else 'Dial'
+
+        accent = data.get('accent', 'blue')
+        self._accent = accent if accent in ACCENT_ORDER else 'blue'
+
+        # OverflowError as well as ValueError: `int(float('inf'))` raises the former, and
+        # a stored infinity is exactly the sort of thing a corrupt preset carries.
+        try:
+            size = float(data.get('size', DEFAULT_SIZE))
+            if size != size:
+                raise ValueError('nan')
+            self._size = max(MIN_SIZE, min(MAX_SIZE, int(size)))
+        except (TypeError, ValueError, OverflowError):
+            self._size = DEFAULT_SIZE
+
         position = data.get('position') or list(DEFAULT_POSITION)
         try:
             self._position = (float(position[0]), float(position[1]))
         except (TypeError, ValueError, IndexError):
+            self._position = DEFAULT_POSITION
+        if any(value != value for value in self._position):
             self._position = DEFAULT_POSITION
         self._glow = bool(data.get('glow', True))
         self._peak = bool(data.get('peak', True))

@@ -3,23 +3,29 @@
 A live tuning tool for Forza Horizon 6 on PC.
 
 Neptune connects to the running game and lets you change how your car behaves
-while you drive: torque delivery and boost.
+while you drive: torque delivery, boost and ride height.
 
 ## Features
 
 | Tab | What it does |
 |---|---|
-| **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, and hold anti-lag on a key to build boost off the line. |
-| **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, and a boost map you can shape per engine speed. |
+| **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
+| **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, a boost map you can shape per engine speed, and a scramble button for a burst of boost on demand. |
 | **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp. |
 | **Boost Gauge** | A floating boost gauge on top of the game, as a dial, a digital readout or a bar. |
-| **Dragy** | Time your car between two speeds, with an on-screen timer and recent runs. |
+| **Dragy** | Time your car between two speeds, or over 60 ft, 1/8 mile and 1/4 mile, with an on-screen timer and recent runs. |
+| **Car** | Shows which car you are in, and how it is aspirated. |
 | **Tunes** | Save your engine and turbo setup per car and switch between saved tunes with one key while driving. |
 | **Presets** | Save and reload whole setups. |
 | **Settings** | Units, display and startup behaviour. |
 
-Anti-lag, air ride and tune switching can each be bound to a key or a
-controller button or a racing-wheel button, on their own tab.
+Anti-lag, launch control, air ride, scramble and tune switching can each be
+bound to a key, a controller button or a racing-wheel button, on their own tab.
+A control only ever drives one feature — binding one that is already in use
+takes it from whatever held it.
+
+Every setting has a **?** next to it. Hover or click it for an explanation of
+what that control does.
 
 ## Download
 

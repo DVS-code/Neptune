@@ -188,9 +188,10 @@ class GaugeOverlay(QWidget):
                 ceiling = O.boost_to_gauge(max(self._blower_peak,
                                                vehicle.blower_ceiling or 0.0))
             else:
-                raw = vehicle.turbo_get('max_boost')
+                turbo = vehicle.turbo_block()
+                raw = turbo.get('max_boost')
                 if raw and not O.is_naturally_aspirated(
-                        raw, vehicle.turbo_get('turbine_limit')):
+                        raw, turbo.get('turbine_limit')):
                     ceiling = O.boost_to_gauge(raw)
 
             if ceiling is None or ceiling <= 0:
@@ -262,6 +263,3 @@ class GaugeOverlay(QWidget):
         )
         if self._on_moved is not None:
             self._on_moved(self._position)
-
-    def update_value(self, value: float | None, gear=None, rpm=None) -> None:
-        self.face.set_value(value, gear, rpm)

@@ -1,7 +1,7 @@
 """Settings: units, display and startup behaviour."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from neptune import __version__
@@ -116,7 +116,7 @@ class SettingsModule(FeatureModule):
         input_card = page.add_card(
             'Controls',
             'Keyboard, controller and racing wheel. Bind keys on each feature\'s own page.')
-        self._widgets['devices'] = QLabel()
+        self._widgets['devices'] = QLabel('Looking for controllers…')
         self._widgets['devices'].setObjectName('RowHint')
         self._widgets['devices'].setWordWrap(True)
         input_card.add(self._widgets['devices'])
@@ -125,7 +125,13 @@ class SettingsModule(FeatureModule):
         refresh_devices.setCursor(Qt.PointingHandCursor)
         refresh_devices.clicked.connect(self._rescan_devices)
         input_card.add(refresh_devices)
-        self._rescan_devices()
+
+        # ⚠️ Deferred, NOT called inline. Enumerating racing wheels asks Windows for the
+        # capabilities of all 16 joystick slots, which measured **314 ms** of blocking
+        # hardware I/O — a third of a second added to Neptune's startup, on a card most
+        # users never look at. Running it after the window is up keeps the launch snappy
+        # and the label fills itself in a moment later.
+        QTimer.singleShot(0, self._rescan_devices)
 
         data_card = page.add_card('Data', 'Where Neptune keeps your tunes and presets.')
         location = QLabel(paths.data_dir())

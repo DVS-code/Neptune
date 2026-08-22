@@ -201,10 +201,16 @@ class DragyOverlay(QWidget):
         if self._tracker is not None:
             bounds = self._tracker.sync()
             if bounds.valid and bounds.width and bounds.height:
-                centre = self.pos()
+                # Divide by the DRAGGABLE SPAN, matching `GameWindowTracker.anchor`.
+                # Dividing by the full width stored a smaller fraction than anchor reads
+                # back, so every re-sync walked the overlay toward the top-left — the
+                # same units mismatch as issue #101, which was only fixed for the gauge.
+                origin = self.pos()
+                span_x = max(1, bounds.width - self.width())
+                span_y = max(1, bounds.height - self.height())
                 self._position = (
-                    max(0.0, min(1.0, (centre.x() - bounds.x) / bounds.width)),
-                    max(0.0, min(1.0, (centre.y() - bounds.y) / bounds.height)))
+                    max(0.0, min(1.0, (origin.x() - bounds.x) / span_x)),
+                    max(0.0, min(1.0, (origin.y() - bounds.y) / span_y)))
 
     def _display_time(self) -> tuple[str, QColor]:
         if self._result is not None:

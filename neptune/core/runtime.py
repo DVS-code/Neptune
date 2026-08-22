@@ -12,6 +12,7 @@ from neptune.vehicle.vehicle import Vehicle, find_vehicles
 TICK_SECONDS = 0.01
 RESCAN_SECONDS = 1.0
 IDENTITY_GRACE_SECONDS = 4.0
+THREAD_JOIN_SECONDS = 2.0
 
 STATE_DETACHED = 'detached'
 STATE_WAITING = 'waiting'
@@ -67,13 +68,18 @@ class Runtime:
         return True, self._message
 
     def detach(self) -> None:
-        self.stop()
+        stopped = self.stop()
         self.registry.dispatch('restore')
         self.registry.dispatch('on_detach')
         self.vehicle = None
         self._identity = None
         if self.process:
-            self.process.close()
+            # Only close the handle once nothing can still be using it. If the tick
+            # thread outlived its join the handle is deliberately leaked: one stray
+            # handle for the life of the process is harmless, a write through a recycled
+            # one is not.
+            if stopped:
+                self.process.close()
             self.process = None
         self._set_status(STATE_DETACHED, 'Not attached')
 
@@ -84,12 +90,24 @@ class Runtime:
         self._thread = threading.Thread(target=self._loop, daemon=True, name='neptune-runtime')
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
+        """Stop the tick thread. True when it actually finished.
+
+        The caller must not close the process handle on a False: the thread is still
+        running and still holds that handle. Windows reuses handle values, so a late
+        write would land on whatever object inherited the number — in a process running
+        as administrator.
+        """
         self._running = False
         thread = self._thread
         self._thread = None
-        if thread:
-            thread.join(timeout=1.0)
+        if not thread:
+            return True
+        thread.join(timeout=THREAD_JOIN_SECONDS)
+        if thread.is_alive():
+            self._thread = thread
+            return False
+        return True
 
     def restore_all(self) -> None:
         self.registry.dispatch('restore')

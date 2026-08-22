@@ -4,13 +4,13 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import Runtime
 from neptune.core.settings import Settings
 from neptune.features.boostgauge import BoostGaugeModule
+from neptune.features.car import CarModule
 from neptune.features.dragy import DragyModule
 from neptune.features.engine import EngineModule
 from neptune.features.presets import PresetsModule
@@ -33,6 +33,7 @@ def build_registry(settings: Settings) -> ModuleRegistry:
     engine.bind_turbo(turbo)
 
     registry.register(SuspensionModule(settings))
+    registry.register(CarModule(settings))
     registry.register(DragyModule(settings))
     registry.register(BoostGaugeModule(settings))
     registry.register(TunesModule(registry, settings))
@@ -56,7 +57,7 @@ def main() -> int:
     application = QApplication(sys.argv)
     application.setApplicationName('Neptune')
     application.setStyle('Fusion')
-    application.setFont(QFont('Segoe UI', 9))
+    application.setFont(T.ui_font())
     application.setStyleSheet(T.stylesheet())
 
     settings = Settings()

@@ -5,7 +5,7 @@ import sys
 from ctypes import byref, c_int, sizeof, windll
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
 from neptune.core import paths
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import STATE_DETACHED, STATE_READY, STATE_WAITING, Runtime
+from neptune.ui import icons
 from neptune.ui import theme as T
 from neptune.ui.page import Page
 from neptune.ui.widgets.wordmark import Wordmark
 
 REFRESH_MS = 90
 GROUP_ORDER = ('Vehicle', 'World', 'Tool')
+NAV_ICON_WIDTH = 18
 
 STATE_COLOURS = {
     STATE_DETACHED: T.TEXT_FAINT,
@@ -64,6 +66,7 @@ class Shell(QWidget):
         self.settings = settings
         self._pages: dict[str, int] = {}
         self._nav: dict[str, QPushButton] = {}
+        self._nav_parts: dict[str, tuple[QLabel, QLabel]] = {}
 
         self.setObjectName('Root')
         self.setWindowTitle('Neptune')
@@ -143,15 +146,63 @@ class Shell(QWidget):
         self._nav_layout.addWidget(label)
 
     def _add_nav_item(self, module) -> None:
-        button = QPushButton(f'  {module.icon}   {module.title}'
-                             if module.icon else f'  {module.title}')
+        """One sidebar row: an icon in a fixed column, then the title.
+
+        The icon is a child label rather than part of the button's own text. Padding the
+        text with spaces cannot line the icons up — the icon font and the interface font
+        have different advance widths, so every row started at a slightly different x and
+        the column visibly wandered. A fixed-width label pins them to a grid, and it also
+        lets the icon carry its own font and colour without restyling the label.
+        """
+        button = QPushButton()
         button.setObjectName('NavItem')
         button.setCheckable(True)
         button.setCursor(Qt.PointingHandCursor)
+
+        row = QHBoxLayout(button)
+        row.setContentsMargins(12, 0, 12, 0)
+        row.setSpacing(10)
+
+        mark = QLabel(icons.get(module.name))
+        mark.setObjectName('NavIcon')
+        mark.setFixedWidth(NAV_ICON_WIDTH)
+        mark.setAlignment(Qt.AlignCenter)
+        # The family comes from `icons`, not the stylesheet: on a machine without the icon
+        # font `get()` hands back a plain Unicode shape, which has to be drawn in the
+        # interface font or it renders as the very tofu box the fallback exists to avoid.
+        icon_font = QFont(icons.font_family())
+        icon_font.setPixelSize(T.SIZE_ICON)
+        mark.setFont(icon_font)
+        row.addWidget(mark)
+
+        label = QLabel(module.title)
+        label.setObjectName('NavLabel')
+        row.addWidget(label)
+        row.addStretch(1)
+
         button.clicked.connect(lambda _checked, name=module.name: self.show_page(name))
         self._nav_group.addButton(button)
         self._nav_layout.addWidget(button)
         self._nav[module.name] = button
+        self._nav_parts[module.name] = (mark, label)
+        self._paint_nav(module.name, selected=False)
+
+    def _paint_nav(self, name: str, selected: bool) -> None:
+        """Colour one nav row's icon and title for its state.
+
+        Done here rather than in the stylesheet because Qt's descendant state selectors
+        (`QPushButton:checked QLabel`) match children whatever the parent's real state is,
+        so every row would render as selected.
+        """
+        parts = self._nav_parts.get(name)
+        if parts is None:
+            return
+        mark, label = parts
+        mark.setStyleSheet(
+            f'color: {T.ACCENT_BRIGHT if selected else T.TEXT_FAINT}; background: transparent;')
+        label.setStyleSheet(
+            f'color: {T.TEXT if selected else T.TEXT_MUTED}; background: transparent;'
+            f' font-weight: {600 if selected else 500};')
 
     def _build_status_bar(self) -> QWidget:
         bar = QWidget()
@@ -170,18 +221,27 @@ class Shell(QWidget):
         layout.addWidget(self.status_text)
         layout.addStretch(1)
 
-        self.metric_rpm = QLabel('')
-        self.metric_rpm.setObjectName('StatMetric')
-        layout.addWidget(self.metric_rpm)
-
-        self.metric_speed = QLabel('')
-        self.metric_speed.setObjectName('StatMetric')
-        layout.addWidget(self.metric_speed)
-
-        self.metric_gear = QLabel('')
-        self.metric_gear.setObjectName('StatMetric')
-        layout.addWidget(self.metric_gear)
+        # Metrics are separated by a faint divider rather than spacing alone: without one
+        # the readings run together into a single unreadable string at a glance.
+        self._metrics: list[QLabel] = []
+        self._metric_seps: list[QLabel] = []
+        for index, name in enumerate(('rpm', 'speed', 'gear', 'boost')):
+            if index:
+                separator = QLabel('·')
+                separator.setObjectName('StatDivider')
+                layout.addWidget(separator)
+                self._metric_seps.append(separator)
+            label = QLabel('')
+            label.setObjectName('StatMetric')
+            setattr(self, f'metric_{name}', label)
+            layout.addWidget(label)
+            self._metrics.append(label)
         return bar
+
+    def _show_metrics(self, visible: bool) -> None:
+        """Hide the dividers along with the readings, so no stray dots are left behind."""
+        for separator in self._metric_seps:
+            separator.setVisible(visible)
 
     def _build_pages(self) -> None:
         grouped: dict[str, list] = {}
@@ -214,6 +274,8 @@ class Shell(QWidget):
         button = self._nav.get(name)
         if button is not None:
             button.setChecked(True)
+        for other in self._nav_parts:
+            self._paint_nav(other, selected=other == name)
 
         module = self.registry.get(name)
         if module is not None:
@@ -250,36 +312,51 @@ class Shell(QWidget):
             except Exception:
                 continue
 
+    @staticmethod
+    def _set_text(label, text: str) -> None:
+        """Set a label only when the text actually changed.
+
+        This runs ~11 times a second on every status field. `setText` with an identical
+        string still costs a relayout, and the status text is unchanged on the large
+        majority of refreshes.
+        """
+        if label.text() != text:
+            label.setText(text)
+
     def _refresh(self) -> None:
         state, message = self.runtime.status
         errors = self.registry.take_errors()
         if errors:
-            self.status_text.setText(errors[-1])
+            self._set_text(self.status_text, errors[-1])
             self.status_dot.set_colour(T.ERR)
         else:
-            self.status_text.setText(message)
+            self._set_text(self.status_text, message)
             self.status_dot.set_colour(STATE_COLOURS.get(state, T.TEXT_FAINT))
 
         if not self.runtime.attached:
-            self.attach_button.setText('Attach to game')
+            self._set_text(self.attach_button, 'Attach to game')
 
         vehicle = self.runtime.vehicle
         if vehicle is None:
-            self.metric_rpm.setText('')
-            self.metric_speed.setText('')
-            self.metric_gear.setText('')
+            for label in self._metrics:
+                self._set_text(label, '')
+            self._show_metrics(False)
         else:
+            self._show_metrics(True)
             rpm = vehicle.rpm
-            self.metric_rpm.setText(f'{rpm:.0f} rpm' if rpm is not None else '')
-            self.metric_speed.setText(self.settings.format_speed(vehicle.speed_ms))
+            self._set_text(self.metric_rpm, f'{rpm:.0f} rpm' if rpm is not None else '--')
+            self._set_text(self.metric_speed, self.settings.format_speed(vehicle.speed_ms))
             gear = vehicle.gear
-            self.metric_gear.setText(f'Gear {gear}' if gear and 0 < gear < 11 else '')
+            self._set_text(self.metric_gear,
+                           f'Gear {gear}' if gear and 0 < gear < 11 else '--')
+            boost = vehicle.boost_gauge
+            self._set_text(self.metric_boost,
+                           self.settings.format_pressure(boost)
+                           if boost is not None else '--')
 
-        current = self.stack.currentWidget()
+        current = self.stack.currentIndex()
         for module in self.registry:
-            index = self._pages.get(module.name)
-            visible = index is not None and self.stack.widget(index) is current
-            if not (visible or module.always_refresh):
+            if not (self._pages.get(module.name) == current or module.always_refresh):
                 continue
             try:
                 module.refresh(vehicle)

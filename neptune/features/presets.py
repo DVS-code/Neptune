@@ -8,8 +8,8 @@ from neptune.core import presets as store
 from neptune.core.module import FeatureModule
 from neptune.ui.widgets.card import Banner
 
-CAPTION = ('Presets cover suspension, wheels and tool settings. '
-           'Engine and turbo setups live in the Tunes tab.')
+CAPTION = ('Presets cover suspension, the boost gauge and Dragy. '
+           'Engine and turbo setups are saved per car in the Tunes tab.')
 
 
 class PresetsModule(FeatureModule):

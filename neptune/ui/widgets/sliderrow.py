@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
+from neptune.ui.widgets.helpmark import HelpMark
 from neptune.ui.widgets.slider import Slider
 
 LABEL_WIDTH = 148
@@ -34,10 +35,22 @@ class SliderRow(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(12)
 
+        # The name and its help mark share one fixed-width column so every slider on a
+        # page starts at the same x, whether or not it has an explanation.
+        name = QWidget()
+        name.setFixedWidth(LABEL_WIDTH)
+        name_row = QHBoxLayout(name)
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+
         self._label = QLabel(label)
         self._label.setObjectName('RowLabel')
-        self._label.setFixedWidth(LABEL_WIDTH)
-        row.addWidget(self._label)
+        name_row.addWidget(self._label)
+
+        self._help = HelpMark(hint)
+        name_row.addWidget(self._help)
+        name_row.addStretch(1)
+        row.addWidget(name)
 
         self._slider = Slider(self._to_position(self._value))
         self._slider.moved.connect(self._on_slider)
@@ -56,13 +69,6 @@ class SliderRow(QWidget):
         row.addWidget(self._unit)
 
         outer.addLayout(row)
-
-        if hint:
-            hint_label = QLabel(hint)
-            hint_label.setObjectName('RowHint')
-            hint_label.setWordWrap(True)
-            hint_label.setContentsMargins(LABEL_WIDTH + 12, 0, 0, 0)
-            outer.addWidget(hint_label)
 
     def _clamp(self, value: float) -> float:
         value = max(self._min, min(self._max, float(value)))

@@ -33,6 +33,12 @@ HINT_TORQUE = 'Multiplies engine torque across the whole rev range.'
 HINT_REV = 'Where the car limits and shifts up. Raising is capped by what the engine can pull.'
 HINT_ANTILAG = 'Hold the bound control to sit on the limiter and build boost. Release to launch.'
 HINT_SPEED_CAP = 'Anti-lag releases past this speed, like a launch control.'
+HINT_LAUNCH = ("Builds boost while the game's own launch control is active, so you "
+               "launch with more boost than the game gives you. Bind this to the same "
+               "control you use for launch control \u2014 your e-brake."
+               )
+NOTE_LAUNCH_GAME_LC = ("Leave the game's launch control ON (Settings > Difficulty) \u2014 "
+                       "this builds boost while it holds the revs.")
 
 
 def _contiguous_runs(pending: dict[int, float]) -> list[tuple[int, list[float]]]:
@@ -78,6 +84,9 @@ class EngineModule(FeatureModule):
         self._build_boost = True
         self._turbo = None
 
+        self._launch_armed = False
+        self._launch_engaged = False
+
         self._speed_cap_enabled = False
         self._speed_cap_ms = 40.0 / 3.6
         self._over_cap = False
@@ -91,11 +100,18 @@ class EngineModule(FeatureModule):
     def binding(self) -> dict | None:
         return self.settings.binding('engine.antilag')
 
+    def launch_binding(self) -> dict | None:
+        return self.settings.binding('engine.launch')
+
     def bindings(self) -> list[dict]:
         return [{
             'key': 'engine.antilag',
             'label': 'Hold for anti-lag',
             'description': 'Hold to sit on the limiter and build boost.',
+        }, {
+            'key': 'engine.launch',
+            'label': 'Hold for enhanced launch control',
+            'description': 'Hold while the game holds the revs, to build boost for the launch.',
         }]
 
     def on_attach(self, vehicle) -> None:
@@ -114,6 +130,7 @@ class EngineModule(FeatureModule):
     def on_car_changed(self, vehicle) -> None:
         self._engaged = False
         self._ready = False
+        self._launch_engaged = False
         self._torque_multiplier = 1.0
         self._rev_limit = None
         self._pending_edits.clear()
@@ -130,11 +147,13 @@ class EngineModule(FeatureModule):
         self.vehicle = None
         self._engaged = False
         self._ready = False
+        self._launch_engaged = False
 
     def restore(self) -> None:
         vehicle = self.vehicle
         self._engaged = False
         self._ready = False
+        self._launch_engaged = False
         self._torque_multiplier = 1.0
         self._rev_limit = None
         self._pending_edits.clear()
@@ -148,6 +167,11 @@ class EngineModule(FeatureModule):
         self._armed = False
         self._engaged = False
         self._ready = False
+        self._launch_engaged = False
+        self._launch_armed = False
+        launch_arm = self._widgets.get('launch_arm')
+        if launch_arm is not None:
+            launch_arm.set_value(False)
         self._torque_multiplier = 1.0
         self._rev_limit = None
 
@@ -178,6 +202,12 @@ class EngineModule(FeatureModule):
             for start, values in _contiguous_runs(pending):
                 vehicle.set_curve_from(start, values)
 
+        # Launch control first: it owns the same rev wall as anti-lag, so only one of the
+        # two may hold it. Whichever is engaged keeps it until it releases.
+        if self._launch_armed:
+            if self._tick_launch(vehicle):
+                return
+
         if not self._armed:
             if self._engaged:
                 self._release()
@@ -196,6 +226,34 @@ class EngineModule(FeatureModule):
             self._bounce(vehicle)
             if self._build_boost and self._turbo is not None:
                 self._turbo.ramp_turbine()
+
+    def _tick_launch(self, vehicle) -> bool:
+        """Spool the turbo while the control is held.
+
+        The GAME's own launch control holds the rpm - we do not touch the rev
+        wall at all. All this does is ramp the turbine to its ceiling so the
+        launch happens on full boost instead of whatever the game spools on its
+        own. Returns True while it owns the tick.
+        """
+        if not inp.is_down(self.launch_binding()):
+            if self._launch_engaged:
+                self._launch_engaged = False
+                if self._turbo is not None:
+                    self._turbo.reset_ramp()
+            return False
+
+        if not self._launch_engaged:
+            self._launch_engaged = True
+        if self._turbo is not None:
+            self._turbo.ramp_turbine()
+        return True
+
+    def _on_launch_armed(self, enabled: bool) -> None:
+        self._launch_armed = bool(enabled)
+        if not self._launch_armed and self._launch_engaged:
+            self._launch_engaged = False
+            if self._turbo is not None:
+                self._turbo.reset_ramp()
 
     def _past_speed_cap(self, vehicle) -> bool:
         speed = vehicle.speed_ms if vehicle is not None else None
@@ -216,14 +274,14 @@ class EngineModule(FeatureModule):
             terminal = -0.2 * peak
         return terminal
 
-    def _engage(self) -> None:
+    def _engage(self, force_ready: bool = False) -> None:
         vehicle = self.vehicle
         if vehicle is None or len(self.stock_curve) < MIN_CURVE_POINTS:
             return
         self._engaged = True
         self._cut = False
         rpm = vehicle.rpm or 0.0
-        self._ready = rpm <= self._hold_rpm
+        self._ready = force_ready or rpm <= self._hold_rpm
         if self._ready:
             self._set_wall(vehicle, True)
             self._phase_started = time.monotonic()
@@ -260,9 +318,14 @@ class EngineModule(FeatureModule):
         curve = self.stock_curve
         count = len(curve)
         per_index = vehicle.rpm_per_index or 100.0
-        base = max(4, min(int(round(self._hold_rpm / per_index)), count - 2))
-        lifted = max(4, min(int(round((self._hold_rpm + BOUNCE_BAND) / per_index)),
+        # `lifted` takes the ceiling and `base` is held at least one index below it.
+        # Clamping the two independently let them collapse onto the same index once the
+        # hold rpm came within BOUNCE_BAND of the top of the curve — the band was then
+        # empty, nothing was written, and the rev wall silently did nothing on exactly
+        # the high-revving cars it is most wanted on.
+        lifted = max(5, min(int(round((self._hold_rpm + BOUNCE_BAND) / per_index)),
                             count - 2))
+        base = max(4, min(int(round(self._hold_rpm / per_index)), lifted - 1))
         edge = base if engaged else lifted
         limiter = self._limiter_value()
 
@@ -413,7 +476,7 @@ class EngineModule(FeatureModule):
         self._widgets['arm'] = arm
         antilag_card.add(arm)
 
-        bind_button = BindButton(self.binding())
+        bind_button = BindButton(self.binding(), settings=self.settings, key='engine.antilag')
         bind_button.bound.connect(
             lambda binding: self.settings.set_binding('engine.antilag', binding))
         self._widgets['bind'] = bind_button
@@ -447,9 +510,26 @@ class EngineModule(FeatureModule):
         self._widgets['speed_cap'] = cap
         antilag_card.add(cap)
 
+        launch_card = page.add_card('Enhanced launch control', HINT_LAUNCH)
+        launch_note = Banner(NOTE_LAUNCH_GAME_LC, 'warn')
+        launch_card.add(launch_note)
+
+        launch_arm = ToggleRow('Enable enhanced launch control', False)
+        launch_arm.toggle.toggled_value.connect(self._on_launch_armed)
+        self._widgets['launch_arm'] = launch_arm
+        launch_card.add(launch_arm)
+
+        launch_bind = BindButton(self.launch_binding(), settings=self.settings,
+                                 key='engine.launch')
+        launch_bind.bound.connect(
+            lambda binding: self.settings.set_binding('engine.launch', binding))
+        self._widgets['launch_bind'] = launch_bind
+        launch_card.add(FieldRow('Hold control', launch_bind))
+
         live_card = page.add_card('Live')
         stats = StatStrip()
         stats.add('state', 'Anti-lag', 'Off')
+        stats.add('launch', 'Launch', 'Off')
         stats.add('torque', 'Peak torque', '--')
         stats.add('power', 'Peak power', '--')
         self._widgets['stats'] = stats
@@ -481,19 +561,30 @@ class EngineModule(FeatureModule):
                 banner.setVisible(False)
             return
 
-        graph.set_data(self.stock_curve, vehicle.curve(),
+        # One read of the curve serves the graph and both peak figures. Reading it per
+        # consumer meant three full array reads out of the game on every refresh.
+        live_curve = vehicle.curve()
+        graph.set_data(self.stock_curve, live_curve,
                        vehicle.rpm_per_index or 100.0, vehicle.rpm or 0.0,
                        vehicle.rev_ceiling, editable=not self._engaged)
 
-        if self._engaged:
+        # Anti-lag and launch control share the rev wall, so the anti-lag readout must not
+        # claim "Holding" when it is launch control that owns it.
+        if self._engaged and not self._launch_engaged:
             stats.set('state', f'Holding {self._hold_rpm}', T.ACCENT_BRIGHT)
         elif self._armed:
             stats.set('state', 'Armed', T.OK)
         else:
             stats.set('state', 'Off', T.TEXT_FAINT)
 
-        torque_nm, torque_rpm = vehicle.peak_torque()
-        power_hp, power_rpm = vehicle.peak_power()
+        if self._launch_engaged:
+            stats.set('launch', 'Building boost', T.ACCENT_BRIGHT)
+        elif self._launch_armed:
+            stats.set('launch', 'Armed', T.OK)
+        else:
+            stats.set('launch', 'Off', T.TEXT_FAINT)
+
+        (torque_nm, torque_rpm), (power_hp, power_rpm) = vehicle.peaks(live_curve)
         stats.set('torque', f'{torque_nm:.0f}', unit=f'Nm @ {torque_rpm}')
         stats.set('power', f'{power_hp:.0f}', unit=f'hp @ {power_rpm}')
 
@@ -510,6 +601,7 @@ class EngineModule(FeatureModule):
             'rev_limit': self._rev_limit,
             'hold_rpm': self._hold_rpm,
             'build_boost': self._build_boost,
+            'launch_armed': self._launch_armed,
             'speed_cap_enabled': self._speed_cap_enabled,
             'speed_cap_ms': self._speed_cap_ms,
         }
@@ -540,6 +632,13 @@ class EngineModule(FeatureModule):
         hold = self._widgets.get('hold')
         if hold is not None:
             hold.set_value(self._hold_rpm)
+
+        # A loaded preset must never arrive mid-launch.
+        self._launch_engaged = False
+        self._launch_armed = bool(data.get('launch_armed', False))
+        launch_arm = self._widgets.get('launch_arm')
+        if launch_arm is not None:
+            launch_arm.set_value(self._launch_armed)
 
         self._build_boost = bool(data.get('build_boost', True))
         boost_toggle = self._widgets.get('build_boost')
