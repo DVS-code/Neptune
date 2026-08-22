@@ -346,6 +346,26 @@ class Vehicle:
     def gear_count(self) -> int | None:
         return self.process.i32(self.config + O.Config.NUM_GEARS)
 
+    def boost_multiplier(self) -> float:
+        """How much the induction system multiplies engine torque, 1.0 when NA.
+
+        `max_scale` (`car+0x0ABC`) is the one boost lever measured to reach physics, and
+        power responds LINEARLY to it — 0.5x gave -50%, 3x gave +191%, on two cars with
+        telemetry power as the oracle. So it is the forced-induction term the peak figures
+        need: without it the estimate is the bare engine curve and reads far too low on any
+        boosted car.
+
+        ⚠️ Naturally aspirated cars must read exactly 1.0 rather than whatever happens to
+        sit in the field, or a car with no turbo would have its estimate scaled by noise.
+        """
+        block = self.turbo_block()
+        scale = block.get('max_scale')
+        if scale is None or scale != scale or scale <= 0.0:
+            return 1.0
+        if O.is_naturally_aspirated(block.get('max_boost'), block.get('turbine_limit')):
+            return 1.0
+        return scale
+
     def peaks(self, curve=None) -> tuple[tuple[float, int], tuple[float, int]]:
         """((peak Nm, rpm), (peak hp, rpm)) from one pass over the curve.
 
@@ -353,16 +373,42 @@ class Vehicle:
         refreshes these several times a second alongside the graph, and reading the
         array once for all three is the difference between one memory read per refresh
         and three.
+
+        ★ MEASURED against the game's own telemetry, not derived:
+
+            torque_nm = curve[index] * max_scale * rpm_per_index
+
+        The curve is **already in a physical unit** — its values run ~2.8-3.7 on a real
+        car, not 0-1 — so normalising it by its own maximum (which the old code did) threw
+        away the magnitude entirely and left `torque_scale` standing in for it. That is why
+        a boosted car read ~3.8x too low.
+
+        ⚠️ `torque_scale` (`config-0x0C`) is NOT part of this product. It reads 236.2 on
+        the validation car where the true multiplier is 176.1; using it is what produced
+        the wrong answer. It stays only in `fingerprint()`, where it identifies a car
+        rather than scaling anything.
+
+        Validation, 784 full-throttle telemetry samples on a turbo car:
+        | rpm  | predicted | measured | ratio  |
+        |------|-----------|----------|--------|
+        | 6500 |     643.7 |    643.7 | 1.0000 |
+        | 7000 |     638.1 |    637.6 | 1.0008 |
+        | 8000 |     607.6 |    607.0 | 1.0009 |
+        Median across the whole range 0.9965. The low bands read a little under because
+        those samples were taken while still accelerating and the turbo had not fully
+        spooled — the steady-state bands are exact.
         """
         if curve is None:
             curve = self.curve()
-        scale = self.torque_scale
-        if len(curve) < 2 or not scale:
+        if len(curve) < 2:
             return ((0.0, 0), (0.0, 0))
 
-        body = curve[:-1]
-        reference = max(abs(value) for value in body) or 1.0
         per_index = self.rpm_per_index or 100.0
+        # Boost is a straight linear multiplier on torque: an interleaved live A/B at
+        # 2x max_scale measured 1.999x on telemetry torque, consistent across every
+        # steady-state rpm band.
+        scale = self.boost_multiplier() * per_index
+        body = curve[:-1]
 
         best_nm = 0.0
         best_nm_rpm = 0
@@ -370,7 +416,7 @@ class Vehicle:
         best_hp_rpm = 0
         for index, value in enumerate(body):
             rpm = index * per_index
-            nm = value / reference * scale
+            nm = value * scale
             if index == 0 or nm > best_nm:
                 best_nm = nm
                 best_nm_rpm = int(rpm)

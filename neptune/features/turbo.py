@@ -82,6 +82,9 @@ class TurboModule(FeatureModule):
         self._scramble_until = 0.0
         self._scramble_edge = inp.EdgeDetector()
         self._scramble_was_active = False
+        # Whether the last tick had any tuning applied, so the moment it stops the
+        # written values can be put back rather than left in the game.
+        self._was_tuned = False
 
         self._lag_enabled = False
         self._lag_rate = DEFAULT_SPOOL_RATE
@@ -216,6 +219,7 @@ class TurboModule(FeatureModule):
         self._lag_value = None
         self._scramble_until = 0.0
         self._scramble_was_active = False
+        self._was_tuned = False
         self._scramble_edge.reset()
 
     def reset_controls(self) -> None:
@@ -309,7 +313,11 @@ class TurboModule(FeatureModule):
 
         stock = self.stock
         ceiling = stock.get('max_boost')
-        boost_factor = self._multipliers['max_boost'] * factor
+        # ⚠️ `mapped` belongs on BOTH levers. It used to scale `max_scale` only, so the
+        # boost map moved power while the boost ceiling — and therefore the gauge — sat
+        # exactly where it was. A table called "boost map" that does not change boost is
+        # the bug this fixes.
+        boost_factor = self._multipliers['max_boost'] * factor * mapped
         if ceiling is not None:
             vehicle.turbo_set('max_boost', min(ceiling * boost_factor, MAX_BOOST_RAW))
 
@@ -317,7 +325,7 @@ class TurboModule(FeatureModule):
         if stock.get('max_scale') is not None:
             vehicle.turbo_set('max_scale',
                               stock['max_scale'] * self._multipliers['max_scale']
-                              * boost_factor * mapped)
+                              * boost_factor)
 
 
         if stock.get('low_airflow') is not None:
@@ -346,21 +354,26 @@ class TurboModule(FeatureModule):
         if self._scramble_enabled and self._scramble_edge.pressed(self.binding()):
             self.fire_scramble()
 
-        # When a burst ends on a car with no other tuning, `_is_tuned` goes false and
-        # `_apply` stops running — which would leave the boosted values written to the
-        # game. Put stock back at the moment the burst expires.
-        was_boosting = self._scramble_was_active
         self._scramble_was_active = self.scramble_active
-        if was_boosting and not self._scramble_was_active and not self._is_tuned():
+
+        # ⚠️ `_apply` only runs while `_is_tuned()` is true, so the moment the settings
+        # go back to neutral it stops writing — and whatever it last wrote is abandoned
+        # in the game. That is how a scramble burst, a by-gear table, or a multiplier
+        # dragged back to 1.00 kept affecting the car after being switched off.
+        # Watching the EDGE covers every one of those paths at once, rather than needing
+        # a restore bolted onto each control.
+        tuned = self._is_tuned()
+        if self._was_tuned and not tuned:
             self._write_stock(vehicle)
+        self._was_tuned = tuned
 
         live = vehicle.boost_raw
-        if self._is_tuned() and live is not None:
+        if tuned and live is not None:
             if math.isnan(live) or math.isinf(live) or live < -1.0:
                 self.restore()
                 return
 
-        if self._is_tuned():
+        if tuned:
             self._forget_if_rebaked(vehicle)
             self._apply(vehicle)
 
@@ -381,10 +394,13 @@ class TurboModule(FeatureModule):
         live_ceiling = vehicle.turbo_get('max_boost')
         if stock_ceiling is None or live_ceiling is None:
             return
-        # Must include the scramble factor, or a running burst reads as "the game reset
-        # our boost" and this would clear the signature on every tick of the burst.
+        # Must match what `_apply` actually writes, factor for factor. Any term missing
+        # here reads as "the game reset our boost" and clears the signature every tick —
+        # scramble was the original reason for that note, and the boost map now scales
+        # the ceiling too, so `_map_factor` has to be in this product as well.
         expected = min(stock_ceiling * self._multipliers['max_boost']
-                       * self._gear_factor(vehicle) * self._scramble_factor(),
+                       * self._gear_factor(vehicle) * self._scramble_factor()
+                       * self._map_factor(vehicle),
                        MAX_BOOST_RAW)
         if abs(live_ceiling - expected) > max(0.01, expected * 0.01):
             self._applied_signature = None
@@ -480,6 +496,8 @@ class TurboModule(FeatureModule):
     def _set_by_gear(self, enabled: bool) -> None:
         self._by_gear = bool(enabled)
         self._applied_signature = None
+        # Switching this off is one of the paths that makes `_is_tuned()` go false; the
+        # edge check in `tick` puts stock back, so nothing to restore here.
         panel = self._widgets.get('gear_panel')
         if panel is not None:
             # Show only the gears this car has before revealing the panel. The rows are
