@@ -99,10 +99,14 @@ Adding a feature is one file in `features/` and one line in `app.py`.
 
 ## Credits
 
-@DVS-code — 
-@Zephyris-Pro —
-@HDR —
-@D3FEKT —
+**@DVS-code** — Owner of this project and creator of its features.
+
+**@Zephyris-Pro** — Collaborator with @DVS-code on implementing the memory module and designing the UI.
+
+**@HDR** — Maintainer of the FH6 car ID list.
+
+**@D3FEKT** — Owner of ForzaTechStudio. Special thanks for the implementation of .swatchbin support.
+
 ## Licence
 
 GNU General Public License v3.0. See [LICENSE](LICENSE).
