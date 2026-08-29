@@ -11,13 +11,14 @@ joystick id 1, 25 buttons, `joyGetPosEx` rc=0.
 Buttons and the POV hat only. Axes are deliberately not bindable — pedals and steering rest at, or
 sweep through, positions that would fire a hold-style binding while simply driving.
 """
+
 from __future__ import annotations
 
 import ctypes
 import time
 from ctypes import wintypes
 
-winmm = ctypes.WinDLL('winmm')
+winmm = ctypes.WinDLL("winmm")
 
 MAX_DEVICES = 16
 MAX_BUTTONS = 32
@@ -32,8 +33,10 @@ POV_CENTERED = 0xFFFF
 
 POV_BASE = 0x1000
 POV_DIRECTIONS = [
-    ('D-Pad Up', 0), ('D-Pad Right', 9000),
-    ('D-Pad Down', 18000), ('D-Pad Left', 27000),
+    ("D-Pad Up", 0),
+    ("D-Pad Right", 9000),
+    ("D-Pad Down", 18000),
+    ("D-Pad Left", 27000),
 ]
 POV_TOLERANCE = 4500
 
@@ -43,33 +46,48 @@ RESCAN_INTERVAL = 2.0
 
 class JOYCAPSW(ctypes.Structure):
     _fields_ = [
-        ('wMid', wintypes.WORD), ('wPid', wintypes.WORD),
-        ('szPname', ctypes.c_wchar * 32),
-        ('wXmin', wintypes.UINT), ('wXmax', wintypes.UINT),
-        ('wYmin', wintypes.UINT), ('wYmax', wintypes.UINT),
-        ('wZmin', wintypes.UINT), ('wZmax', wintypes.UINT),
-        ('wNumButtons', wintypes.UINT),
-        ('wPeriodMin', wintypes.UINT), ('wPeriodMax', wintypes.UINT),
-        ('wRmin', wintypes.UINT), ('wRmax', wintypes.UINT),
-        ('wUmin', wintypes.UINT), ('wUmax', wintypes.UINT),
-        ('wVmin', wintypes.UINT), ('wVmax', wintypes.UINT),
-        ('wCaps', wintypes.UINT),
-        ('wMaxAxes', wintypes.UINT), ('wNumAxes', wintypes.UINT),
-        ('wMaxButtons', wintypes.UINT),
-        ('szRegKey', ctypes.c_wchar * 32),
-        ('szOEMVxD', ctypes.c_wchar * 260),
+        ("wMid", wintypes.WORD),
+        ("wPid", wintypes.WORD),
+        ("szPname", ctypes.c_wchar * 32),
+        ("wXmin", wintypes.UINT),
+        ("wXmax", wintypes.UINT),
+        ("wYmin", wintypes.UINT),
+        ("wYmax", wintypes.UINT),
+        ("wZmin", wintypes.UINT),
+        ("wZmax", wintypes.UINT),
+        ("wNumButtons", wintypes.UINT),
+        ("wPeriodMin", wintypes.UINT),
+        ("wPeriodMax", wintypes.UINT),
+        ("wRmin", wintypes.UINT),
+        ("wRmax", wintypes.UINT),
+        ("wUmin", wintypes.UINT),
+        ("wUmax", wintypes.UINT),
+        ("wVmin", wintypes.UINT),
+        ("wVmax", wintypes.UINT),
+        ("wCaps", wintypes.UINT),
+        ("wMaxAxes", wintypes.UINT),
+        ("wNumAxes", wintypes.UINT),
+        ("wMaxButtons", wintypes.UINT),
+        ("szRegKey", ctypes.c_wchar * 32),
+        ("szOEMVxD", ctypes.c_wchar * 260),
     ]
 
 
 class JOYINFOEX(ctypes.Structure):
     _fields_ = [
-        ('dwSize', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
-        ('dwXpos', wintypes.DWORD), ('dwYpos', wintypes.DWORD),
-        ('dwZpos', wintypes.DWORD), ('dwRpos', wintypes.DWORD),
-        ('dwUpos', wintypes.DWORD), ('dwVpos', wintypes.DWORD),
-        ('dwButtons', wintypes.DWORD), ('dwButtonNumber', wintypes.DWORD),
-        ('dwPOV', wintypes.DWORD),
-        ('dwReserved1', wintypes.DWORD), ('dwReserved2', wintypes.DWORD),
+        ("dwSize", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("dwXpos", wintypes.DWORD),
+        ("dwYpos", wintypes.DWORD),
+        ("dwZpos", wintypes.DWORD),
+        ("dwRpos", wintypes.DWORD),
+        ("dwUpos", wintypes.DWORD),
+        ("dwVpos", wintypes.DWORD),
+        ("dwButtons", wintypes.DWORD),
+        ("dwButtonNumber", wintypes.DWORD),
+        ("dwPOV", wintypes.DWORD),
+        ("dwReserved1", wintypes.DWORD),
+        ("dwReserved2", wintypes.DWORD),
     ]
 
 
@@ -78,40 +96,61 @@ THRUSTMASTER = 0x044F
 FANATEC = 0x0EB7
 
 _G29 = {
-    0: 'X', 1: 'Square', 2: 'Circle', 3: 'Triangle',
-    4: 'Right Paddle', 5: 'Left Paddle',
-    6: 'R2', 7: 'L2', 8: 'Share', 9: 'Options',
-    10: 'R3', 11: 'L3', 12: 'PlayStation',
-    19: 'Dial Right', 20: 'Dial Left', 21: 'Dial Press',
-    22: 'Minus', 23: 'Plus', 24: 'Enter',
+    0: "X",
+    1: "Square",
+    2: "Circle",
+    3: "Triangle",
+    4: "Right Paddle",
+    5: "Left Paddle",
+    6: "R2",
+    7: "L2",
+    8: "Share",
+    9: "Options",
+    10: "R3",
+    11: "L3",
+    12: "PlayStation",
+    19: "Dial Right",
+    20: "Dial Left",
+    21: "Dial Press",
+    22: "Minus",
+    23: "Plus",
+    24: "Enter",
 }
 
 _G920 = {
-    0: 'A', 1: 'B', 2: 'X', 3: 'Y',
-    4: 'Right Paddle', 5: 'Left Paddle',
-    6: 'RB', 7: 'LB', 8: 'View', 9: 'Menu',
-    10: 'R3', 11: 'L3',
+    0: "A",
+    1: "B",
+    2: "X",
+    3: "Y",
+    4: "Right Paddle",
+    5: "Left Paddle",
+    6: "RB",
+    7: "LB",
+    8: "View",
+    9: "Menu",
+    10: "R3",
+    11: "L3",
 }
 
 KNOWN_WHEELS: dict[tuple[int, int], tuple[str, dict[int, str]]] = {
-    (LOGITECH, 0xC24F): ('Logitech G29', _G29),
-    (LOGITECH, 0xC260): ('Logitech G29', _G29),
-    (LOGITECH, 0xC262): ('Logitech G920', _G920),
-    (LOGITECH, 0xC266): ('Logitech G923', _G29),
-    (LOGITECH, 0xC267): ('Logitech G923', _G920),
-    (LOGITECH, 0xC24A): ('Logitech G27', _G29),
-    (LOGITECH, 0xC294): ('Logitech Driving Force', {}),
-    (LOGITECH, 0xC29B): ('Logitech G27', _G29),
-    (LOGITECH, 0xC298): ('Logitech Driving Force Pro', {}),
-    (LOGITECH, 0xC29A): ('Logitech Driving Force GT', {}),
-    (THRUSTMASTER, 0xB65D): ('Thrustmaster T150', {}),
-    (THRUSTMASTER, 0xB66E): ('Thrustmaster T300', {}),
-    (THRUSTMASTER, 0xB689): ('Thrustmaster TS-PC', {}),
-    (THRUSTMASTER, 0xB66D): ('Thrustmaster T500', {}),
-    (FANATEC, 0x0005): ('Fanatec CSL Elite', {}),
-    (FANATEC, 0x0006): ('Fanatec CSL Elite PS4', {}),
-    (FANATEC, 0x0020): ('Fanatec DD1', {}),
-    (FANATEC, 0x0E03): ('Fanatec CSL DD', {}),
+    (LOGITECH, 0xC24F): ("Logitech G29", _G29),
+    (LOGITECH, 0xC260): ("Logitech G29", _G29),
+    (LOGITECH, 0xC262): ("Logitech G920", _G920),
+    (LOGITECH, 0xC266): ("Logitech G923", _G29),
+    (LOGITECH, 0xC267): ("Logitech G923", _G920),
+    (LOGITECH, 0xC24A): ("Logitech G27", _G29),
+    (LOGITECH, 0xC294): ("Logitech Driving Force", {}),
+    (LOGITECH, 0xC29B): ("Logitech G27", _G29),
+    (LOGITECH, 0xC298): ("Logitech Driving Force Pro", {}),
+    (LOGITECH, 0xC29A): ("Logitech Driving Force GT", {}),
+    (THRUSTMASTER, 0xB65D): ("Thrustmaster T150", {}),
+    (THRUSTMASTER, 0xB66E): ("Thrustmaster T300", {}),
+    (THRUSTMASTER, 0xB689): ("Thrustmaster TS-PC", {}),
+    (THRUSTMASTER, 0xB66D): ("Thrustmaster T500", {}),
+    (FANATEC, 0x0005): ("Fanatec CSL Elite", {}),
+    (FANATEC, 0x0006): ("Fanatec CSL Elite PS4", {}),
+    (FANATEC, 0x0020): ("Fanatec DD1", {}),
+    (FANATEC, 0x0E03): ("Fanatec CSL DD", {}),
 }
 
 
@@ -121,7 +160,7 @@ MICROSOFT = 0x045E
 class Device:
     """One connected joystick-class device."""
 
-    __slots__ = ('index', 'name', 'vendor', 'product', 'buttons', 'has_pov')
+    __slots__ = ("index", "name", "vendor", "product", "buttons", "has_pov")
 
     def __init__(self, index: int, caps: JOYCAPSW):
         self.index = index
@@ -135,10 +174,10 @@ class Device:
 
     @staticmethod
     def _fallback_name(caps: JOYCAPSW) -> str:
-        raw = (caps.szPname or '').strip()
-        if raw and 'PC-joystick' not in raw:
+        raw = (caps.szPname or "").strip()
+        if raw and "PC-joystick" not in raw:
             return raw
-        return f'Wheel {caps.wMid:04X}:{caps.wPid:04X}'
+        return f"Wheel {caps.wMid:04X}:{caps.wPid:04X}"
 
     def button_label(self, index: int) -> str:
         known = KNOWN_WHEELS.get((self.vendor, self.product))
@@ -146,7 +185,7 @@ class Device:
             label = known[1].get(index)
             if label:
                 return label
-        return f'Button {index + 1}'
+        return f"Button {index + 1}"
 
 
 _devices: list[Device] = []
@@ -206,14 +245,14 @@ def _device_for(binding: dict) -> Device | None:
     Matched by vendor/product first so the binding survives the device index shifting — which it
     does whenever another controller is plugged in ahead of it.
     """
-    vendor = binding.get('vendor')
-    product = binding.get('product')
+    vendor = binding.get("vendor")
+    product = binding.get("product")
     available = devices()
     if vendor is not None and product is not None:
         for device in available:
             if device.vendor == vendor and device.product == product:
                 return device
-    index = binding.get('device')
+    index = binding.get("device")
     for device in available:
         if device.index == index:
             return device
@@ -244,7 +283,7 @@ def is_down(binding: dict) -> bool:
     state = _poll(device.index)
     if state is None:
         return False
-    code = int(binding.get('code', -1))
+    code = int(binding.get("code", -1))
     if code >= POV_BASE:
         return _pov_matches(int(state.dwPOV), code - POV_BASE)
     if 0 <= code < MAX_BUTTONS:
@@ -255,18 +294,17 @@ def is_down(binding: dict) -> bool:
 def make_binding(device: Device, code: int) -> dict:
     """A persistable binding. Vendor and product are stored so it survives re-indexing."""
     if code >= POV_BASE:
-        label = next((name for name, angle in POV_DIRECTIONS
-                      if angle == code - POV_BASE), 'D-Pad')
+        label = next((name for name, angle in POV_DIRECTIONS if angle == code - POV_BASE), "D-Pad")
     else:
         label = device.button_label(code)
     return {
-        'kind': 'wheel',
-        'code': int(code),
-        'label': label,
-        'device': device.index,
-        'vendor': device.vendor,
-        'product': device.product,
-        'device_name': device.name,
+        "kind": "wheel",
+        "code": int(code),
+        "label": label,
+        "device": device.index,
+        "vendor": device.vendor,
+        "product": device.product,
+        "device_name": device.name,
     }
 
 

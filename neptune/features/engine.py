@@ -1,4 +1,5 @@
 """Engine: torque curve, torque multiplier, rev limit and anti-lag."""
+
 from __future__ import annotations
 
 import time
@@ -29,16 +30,19 @@ BOUNCE_BAND = 350
 CUT_MS = 30
 LIFT_MS = 30
 
-HINT_TORQUE = 'Multiplies engine torque across the whole rev range.'
-HINT_REV = 'Where the car limits and shifts up. Raising is capped by what the engine can pull.'
-HINT_ANTILAG = 'Hold the bound control to sit on the limiter and build boost. Release to launch.'
-HINT_SPEED_CAP = 'Anti-lag releases past this speed, like a launch control.'
-HINT_LAUNCH = ("Builds boost while the game's own launch control is active, so you "
-               "launch with more boost than the game gives you. Bind this to the same "
-               "control you use for launch control \u2014 your e-brake."
-               )
-NOTE_LAUNCH_GAME_LC = ("Leave the game's launch control ON (Settings > Difficulty) \u2014 "
-                       "this builds boost while it holds the revs.")
+HINT_TORQUE = "Multiplies engine torque across the whole rev range."
+HINT_REV = "Where the car limits and shifts up. Raising is capped by what the engine can pull."
+HINT_ANTILAG = "Hold the bound control to sit on the limiter and build boost. Release to launch."
+HINT_SPEED_CAP = "Anti-lag releases past this speed, like a launch control."
+HINT_LAUNCH = (
+    "Builds boost while the game's own launch control is active, so you "
+    "launch with more boost than the game gives you. Bind this to the same "
+    "control you use for launch control \u2014 your e-brake."
+)
+NOTE_LAUNCH_GAME_LC = (
+    "Leave the game's launch control ON (Settings > Difficulty) \u2014 "
+    "this builds boost while it holds the revs."
+)
 
 
 def _contiguous_runs(pending: dict[int, float]) -> list[tuple[int, list[float]]]:
@@ -52,11 +56,11 @@ def _contiguous_runs(pending: dict[int, float]) -> list[tuple[int, list[float]]]
 
 
 class EngineModule(FeatureModule):
-    name = 'engine'
-    title = 'Engine'
-    subtitle = 'Torque delivery, rev limit and launch behaviour.'
-    icon = 'engine.png'
-    group = 'Vehicle'
+    name = "engine"
+    title = "Engine"
+    subtitle = "Torque delivery, rev limit and launch behaviour."
+    icon = "engine.png"
+    group = "Vehicle"
     order = 10
 
     def __init__(self, settings):
@@ -78,7 +82,6 @@ class EngineModule(FeatureModule):
         self._ready = False
         self._cut = False
 
-
         self._wall_tail_written = False
         self._phase_started = 0.0
         self._hold_rpm = 4000
@@ -99,26 +102,28 @@ class EngineModule(FeatureModule):
         self._turbo = turbo
 
     def binding(self) -> dict | None:
-        return self.settings.binding('engine.antilag')
+        return self.settings.binding("engine.antilag")
 
     def launch_binding(self) -> dict | None:
-        return self.settings.binding('engine.launch')
+        return self.settings.binding("engine.launch")
 
     def bindings(self) -> list[dict]:
-        return [{
-            'key': 'engine.antilag',
-            'label': 'Hold for anti-lag',
-            'description': 'Hold to sit on the limiter and build boost.',
-        }, {
-            'key': 'engine.launch',
-            'label': 'Hold for enhanced launch control',
-            'description': 'Hold while the game holds the revs, to build boost for the launch.',
-        }]
+        return [
+            {
+                "key": "engine.antilag",
+                "label": "Hold for anti-lag",
+                "description": "Hold to sit on the limiter and build boost.",
+            },
+            {
+                "key": "engine.launch",
+                "label": "Hold for enhanced launch control",
+                "description": "Hold while the game holds the revs, to build boost for the launch.",
+            },
+        ]
 
     def on_attach(self, vehicle) -> None:
         """Capture stock values. Never touches widgets: this runs off the interface thread."""
         self.vehicle = vehicle
-
 
         if vehicle is None:
             return
@@ -170,24 +175,23 @@ class EngineModule(FeatureModule):
         self._ready = False
         self._launch_engaged = False
         self._launch_armed = False
-        launch_arm = self._widgets.get('launch_arm')
+        launch_arm = self._widgets.get("launch_arm")
         if launch_arm is not None:
             launch_arm.set_value(False)
         self._torque_multiplier = 1.0
         self._rev_limit = None
         self._custom_curve = None
 
-        torque = self._widgets.get('torque')
+        torque = self._widgets.get("torque")
         if torque is not None:
             torque.set_value(1.0)
-        arm = self._widgets.get('arm')
+        arm = self._widgets.get("arm")
         if arm is not None:
             arm.set_value(False)
         self._sync_rev_slider()
 
     def tick(self, vehicle) -> None:
         self.vehicle = vehicle
-
 
         if vehicle is None or not self.stock_curve:
             return
@@ -203,11 +207,9 @@ class EngineModule(FeatureModule):
             self._pending_edits = {}
             for start, values in _contiguous_runs(pending):
                 vehicle.set_curve_from(start, values)
-            graph = self._widgets.get('graph')
+            graph = self._widgets.get("graph")
             if graph is not None and graph.live:
                 self._custom_curve = list(graph.live)
-
-
 
         if self._launch_armed:
             if self._tick_launch(vehicle):
@@ -324,16 +326,10 @@ class EngineModule(FeatureModule):
         count = len(curve)
         per_index = vehicle.rpm_per_index or 100.0
 
-
-
-
-
-        lifted = max(5, min(int(round((self._hold_rpm + BOUNCE_BAND) / per_index)),
-                            count - 2))
+        lifted = max(5, min(int(round((self._hold_rpm + BOUNCE_BAND) / per_index)), count - 2))
         base = max(4, min(int(round(self._hold_rpm / per_index)), lifted - 1))
         edge = base if engaged else lifted
         limiter = self._limiter_value()
-
 
         if not self._wall_tail_written:
             tail = [limiter] * (count - 1 - lifted)
@@ -352,7 +348,6 @@ class EngineModule(FeatureModule):
             return
         body = [value * self._torque_multiplier for value in self.stock_curve[:-1]]
         vehicle.set_curve(body + [self.stock_curve[-1]])
-
 
         self._wall_tail_written = False
 
@@ -377,8 +372,11 @@ class EngineModule(FeatureModule):
         vehicle.set_curve_from(0, self._custom_curve[:-1])
 
     def _curve_is_tuned(self) -> bool:
-        return (self._rev_limit is not None or self._torque_multiplier != 1.0
-                or self._custom_curve is not None)
+        return (
+            self._rev_limit is not None
+            or self._torque_multiplier != 1.0
+            or self._custom_curve is not None
+        )
 
     def _reapply_curve_state(self) -> None:
         """Re-apply whatever curve state is active.
@@ -392,7 +390,7 @@ class EngineModule(FeatureModule):
         self._apply_rev_ceiling()
 
     def _sync_rev_slider(self) -> None:
-        slider = self._widgets.get('rev')
+        slider = self._widgets.get("rev")
         if slider is None:
             return
         target = self._rev_limit or self.stock_ceiling or self.stock_redline or 7000.0
@@ -421,7 +419,7 @@ class EngineModule(FeatureModule):
     def _on_speed_cap_enabled(self, enabled: bool) -> None:
         self._speed_cap_enabled = bool(enabled)
         self._over_cap = False
-        slider = self._widgets.get('speed_cap')
+        slider = self._widgets.get("speed_cap")
         if slider is not None:
             slider.set_enabled(bool(enabled))
 
@@ -431,7 +429,7 @@ class EngineModule(FeatureModule):
 
     def _commit_curve(self) -> None:
         vehicle = self.vehicle
-        graph = self._widgets.get('graph')
+        graph = self._widgets.get("graph")
         if vehicle is None or graph is None or not graph.live or self._engaged:
             return
         vehicle.set_curve_from(0, list(graph.live)[:-1])
@@ -446,139 +444,144 @@ class EngineModule(FeatureModule):
         self._torque_multiplier = 1.0
         self._custom_curve = None
         self._pending_edits.clear()
-        slider = self._widgets.get('torque')
+        slider = self._widgets.get("torque")
         if slider is not None:
             slider.set_value(1.0)
-        graph = self._widgets.get('graph')
+        graph = self._widgets.get("graph")
         if graph is not None:
             graph.clear_selection()
 
     def build_page(self, page) -> None:
         curve_card = page.add_card(
-            'Torque curve',
-            'Drag to reshape. Right-drag to select a range, then drag any selected point '
-            'to move the whole group.')
+            "Torque curve",
+            "Drag to reshape. Right-drag to select a range, then drag any selected point "
+            "to move the whole group.",
+        )
 
         graph = TorqueGraph()
         graph.point_changed.connect(self._on_point_changed)
-        self._widgets['graph'] = graph
+        self._widgets["graph"] = graph
         curve_card.add(graph)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
 
-        apply_button = PrimaryButton('Apply curve')
+        apply_button = PrimaryButton("Apply curve")
         apply_button.clicked.connect(self._commit_curve)
         actions.addWidget(apply_button)
 
-        double_button = Button('Double')
+        double_button = Button("Double")
         double_button.clicked.connect(lambda: graph.scale_selection(2.0))
         actions.addWidget(double_button)
 
-        halve_button = Button('Halve')
+        halve_button = Button("Halve")
         halve_button.clicked.connect(lambda: graph.scale_selection(0.5))
         actions.addWidget(halve_button)
 
-        reset_button = Button('Reset to stock')
+        reset_button = Button("Reset to stock")
         reset_button.clicked.connect(self._reset_curve)
         actions.addWidget(reset_button)
         actions.addStretch(1)
         curve_card.add_layout(actions)
 
-        power_card = page.add_card('Power and limit')
-        torque = SliderRow('Torque', TORQUE_MIN, TORQUE_MAX, 1.0, step=0.05,
-                           decimals=2, unit='x', hint=HINT_TORQUE)
+        power_card = page.add_card("Power and limit")
+        torque = SliderRow(
+            "Torque", TORQUE_MIN, TORQUE_MAX, 1.0, step=0.05, decimals=2, unit="x", hint=HINT_TORQUE
+        )
         torque.changed.connect(self._on_torque)
-        self._widgets['torque'] = torque
+        self._widgets["torque"] = torque
         power_card.add(torque)
 
-        rev = SliderRow('Rev limit', REV_MIN, REV_MAX, 7000, step=50,
-                        decimals=0, unit='rpm', hint=HINT_REV)
+        rev = SliderRow(
+            "Rev limit", REV_MIN, REV_MAX, 7000, step=50, decimals=0, unit="rpm", hint=HINT_REV
+        )
         rev.changed.connect(self._on_rev_limit)
-        self._widgets['rev'] = rev
+        self._widgets["rev"] = rev
         power_card.add(rev)
 
-        antilag_card = page.add_card('Anti-lag', HINT_ANTILAG)
-        arm = ToggleRow('Enable anti-lag', False)
-        arm.toggle.toggled_value.connect(lambda value: setattr(self, '_armed', value))
-        self._widgets['arm'] = arm
+        antilag_card = page.add_card("Anti-lag", HINT_ANTILAG)
+        arm = ToggleRow("Enable anti-lag", False)
+        arm.toggle.toggled_value.connect(lambda value: setattr(self, "_armed", value))
+        self._widgets["arm"] = arm
         antilag_card.add(arm)
 
-        bind_button = BindButton(self.binding(), settings=self.settings, key='engine.antilag')
+        bind_button = BindButton(self.binding(), settings=self.settings, key="engine.antilag")
         bind_button.bound.connect(
-            lambda binding: self.settings.set_binding('engine.antilag', binding))
-        self._widgets['bind'] = bind_button
+            lambda binding: self.settings.set_binding("engine.antilag", binding)
+        )
+        self._widgets["bind"] = bind_button
 
         from neptune.ui.widgets.card import FieldRow
-        antilag_card.add(FieldRow('Hold control', bind_button))
 
-        hold = SliderRow('Hold at', HOLD_MIN, HOLD_MAX, 4000, step=100,
-                         decimals=0, unit='rpm')
+        antilag_card.add(FieldRow("Hold control", bind_button))
+
+        hold = SliderRow("Hold at", HOLD_MIN, HOLD_MAX, 4000, step=100, decimals=0, unit="rpm")
         hold.changed.connect(self._on_hold_rpm)
-        self._widgets['hold'] = hold
+        self._widgets["hold"] = hold
         antilag_card.add(hold)
 
-        boost_toggle = ToggleRow('Build boost while holding', True)
+        boost_toggle = ToggleRow("Build boost while holding", True)
         boost_toggle.toggle.toggled_value.connect(
-            lambda value: setattr(self, '_build_boost', value))
-        self._widgets['build_boost'] = boost_toggle
+            lambda value: setattr(self, "_build_boost", value)
+        )
+        self._widgets["build_boost"] = boost_toggle
         antilag_card.add(boost_toggle)
 
         antilag_card.add_divider()
 
-        cap_toggle = ToggleRow('Release above a speed', False, hint=HINT_SPEED_CAP)
+        cap_toggle = ToggleRow("Release above a speed", False, hint=HINT_SPEED_CAP)
         cap_toggle.toggle.toggled_value.connect(self._on_speed_cap_enabled)
-        self._widgets['speed_cap_toggle'] = cap_toggle
+        self._widgets["speed_cap_toggle"] = cap_toggle
         antilag_card.add(cap_toggle)
 
         _, unit = self.settings.speed(0)
-        cap = SliderRow('Release above', 5, 200, 40, step=5, decimals=0, unit=unit)
+        cap = SliderRow("Release above", 5, 200, 40, step=5, decimals=0, unit=unit)
         cap.changed.connect(self._on_speed_cap)
         cap.set_enabled(False)
-        self._widgets['speed_cap'] = cap
+        self._widgets["speed_cap"] = cap
         antilag_card.add(cap)
 
-        launch_card = page.add_card('Enhanced launch control', HINT_LAUNCH)
-        launch_note = Banner(NOTE_LAUNCH_GAME_LC, 'warn')
+        launch_card = page.add_card("Enhanced launch control", HINT_LAUNCH)
+        launch_note = Banner(NOTE_LAUNCH_GAME_LC, "warn")
         launch_card.add(launch_note)
 
-        launch_arm = ToggleRow('Enable enhanced launch control', False)
+        launch_arm = ToggleRow("Enable enhanced launch control", False)
         launch_arm.toggle.toggled_value.connect(self._on_launch_armed)
-        self._widgets['launch_arm'] = launch_arm
+        self._widgets["launch_arm"] = launch_arm
         launch_card.add(launch_arm)
 
-        launch_bind = BindButton(self.launch_binding(), settings=self.settings,
-                                 key='engine.launch')
+        launch_bind = BindButton(self.launch_binding(), settings=self.settings, key="engine.launch")
         launch_bind.bound.connect(
-            lambda binding: self.settings.set_binding('engine.launch', binding))
-        self._widgets['launch_bind'] = launch_bind
-        launch_card.add(FieldRow('Hold control', launch_bind))
+            lambda binding: self.settings.set_binding("engine.launch", binding)
+        )
+        self._widgets["launch_bind"] = launch_bind
+        launch_card.add(FieldRow("Hold control", launch_bind))
 
-        live_card = page.add_card('Live')
+        live_card = page.add_card("Live")
         stats = StatStrip()
-        stats.add('state', 'Anti-lag', 'Off')
-        stats.add('launch', 'Launch', 'Off')
-        stats.add('torque', 'Peak torque', '--')
-        stats.add('power', 'Peak power', '--')
-        self._widgets['stats'] = stats
+        stats.add("state", "Anti-lag", "Off")
+        stats.add("launch", "Launch", "Off")
+        stats.add("torque", "Peak torque", "--")
+        stats.add("power", "Peak power", "--")
+        self._widgets["stats"] = stats
         live_card.add(stats)
 
-        banner = Banner('', 'warn')
+        banner = Banner("", "warn")
         banner.setVisible(False)
-        self._widgets['banner'] = banner
+        self._widgets["banner"] = banner
         live_card.add(banner)
 
     def refresh(self, vehicle) -> None:
-        graph = self._widgets.get('graph')
-        stats = self._widgets.get('stats')
-        banner = self._widgets.get('banner')
+        graph = self._widgets.get("graph")
+        stats = self._widgets.get("stats")
+        banner = self._widgets.get("banner")
         if graph is None or stats is None:
             return
 
         if self._controls_dirty:
             self._controls_dirty = False
             self._sync_rev_slider()
-            torque = self._widgets.get('torque')
+            torque = self._widgets.get("torque")
             if torque is not None:
                 torque.set_value(self._torque_multiplier)
 
@@ -589,49 +592,53 @@ class EngineModule(FeatureModule):
                 banner.setVisible(False)
             return
 
-
-
         live_curve = vehicle.curve()
-        graph.set_data(self.stock_curve, live_curve,
-                       vehicle.rpm_per_index or 100.0, vehicle.rpm or 0.0,
-                       vehicle.rev_ceiling, editable=not self._engaged)
-
-
+        graph.set_data(
+            self.stock_curve,
+            live_curve,
+            vehicle.rpm_per_index or 100.0,
+            vehicle.rpm or 0.0,
+            vehicle.rev_ceiling,
+            editable=not self._engaged,
+        )
 
         if self._engaged and not self._launch_engaged:
-            stats.set('state', f'Holding {self._hold_rpm}', T.ACCENT_BRIGHT)
+            stats.set("state", f"Holding {self._hold_rpm}", T.ACCENT_BRIGHT)
         elif self._armed:
-            stats.set('state', 'Armed', T.OK)
+            stats.set("state", "Armed", T.OK)
         else:
-            stats.set('state', 'Off', T.TEXT_FAINT)
+            stats.set("state", "Off", T.TEXT_FAINT)
 
         if self._launch_engaged:
-            stats.set('launch', 'Building boost', T.ACCENT_BRIGHT)
+            stats.set("launch", "Building boost", T.ACCENT_BRIGHT)
         elif self._launch_armed:
-            stats.set('launch', 'Armed', T.OK)
+            stats.set("launch", "Armed", T.OK)
         else:
-            stats.set('launch', 'Off', T.TEXT_FAINT)
+            stats.set("launch", "Off", T.TEXT_FAINT)
 
         (torque_nm, torque_rpm), (power_hp, power_rpm) = vehicle.peaks(live_curve)
-        stats.set('torque', f'{torque_nm:.0f}', unit=f'Nm @ {torque_rpm}')
-        stats.set('power', f'{power_hp:.0f}', unit=f'hp @ {power_rpm}')
+        stats.set("torque", f"{torque_nm:.0f}", unit=f"Nm @ {torque_rpm}")
+        stats.set("power", f"{power_hp:.0f}", unit=f"hp @ {power_rpm}")
 
         if banner is not None:
             if not vehicle.can_tune_curve():
-                banner.set('This engine uses a layout Neptune cannot reshape. '
-                           'Torque and rev limit still work.', 'warn')
+                banner.set(
+                    "This engine uses a layout Neptune cannot reshape. "
+                    "Torque and rev limit still work.",
+                    "warn",
+                )
             else:
                 banner.setVisible(False)
 
     def save_state(self) -> dict:
         return {
-            'torque': self._torque_multiplier,
-            'rev_limit': self._rev_limit,
-            'hold_rpm': self._hold_rpm,
-            'build_boost': self._build_boost,
-            'launch_armed': self._launch_armed,
-            'speed_cap_enabled': self._speed_cap_enabled,
-            'speed_cap_ms': self._speed_cap_ms,
+            "torque": self._torque_multiplier,
+            "rev_limit": self._rev_limit,
+            "hold_rpm": self._hold_rpm,
+            "build_boost": self._build_boost,
+            "launch_armed": self._launch_armed,
+            "speed_cap_enabled": self._speed_cap_enabled,
+            "speed_cap_ms": self._speed_cap_ms,
         }
 
     def load_state(self, data: dict) -> None:
@@ -649,7 +656,7 @@ class EngineModule(FeatureModule):
                 value = float(data.get(key, fallback))
             except (TypeError, ValueError):
                 return fallback
-            if value != value or value in (float('inf'), float('-inf')):
+            if value != value or value in (float("inf"), float("-inf")):
                 return fallback
             if low is not None:
                 value = max(low, value)
@@ -657,42 +664,40 @@ class EngineModule(FeatureModule):
                 value = min(high, value)
             return value
 
-        self._hold_rpm = int(_number('hold_rpm', 4000, HOLD_MIN, HOLD_MAX))
-        hold = self._widgets.get('hold')
+        self._hold_rpm = int(_number("hold_rpm", 4000, HOLD_MIN, HOLD_MAX))
+        hold = self._widgets.get("hold")
         if hold is not None:
             hold.set_value(self._hold_rpm)
 
-
         self._launch_engaged = False
-        self._launch_armed = bool(data.get('launch_armed', False))
-        launch_arm = self._widgets.get('launch_arm')
+        self._launch_armed = bool(data.get("launch_armed", False))
+        launch_arm = self._widgets.get("launch_arm")
         if launch_arm is not None:
             launch_arm.set_value(self._launch_armed)
 
-        self._build_boost = bool(data.get('build_boost', True))
-        boost_toggle = self._widgets.get('build_boost')
+        self._build_boost = bool(data.get("build_boost", True))
+        boost_toggle = self._widgets.get("build_boost")
         if boost_toggle is not None:
             boost_toggle.set_value(self._build_boost)
 
-        self._speed_cap_enabled = bool(data.get('speed_cap_enabled', False))
-        self._speed_cap_ms = _number('speed_cap_ms', 40.0 / 3.6, 0.0, 200.0)
+        self._speed_cap_enabled = bool(data.get("speed_cap_enabled", False))
+        self._speed_cap_ms = _number("speed_cap_ms", 40.0 / 3.6, 0.0, 200.0)
         self._over_cap = False
-        cap_toggle = self._widgets.get('speed_cap_toggle')
+        cap_toggle = self._widgets.get("speed_cap_toggle")
         if cap_toggle is not None:
             cap_toggle.set_value(self._speed_cap_enabled)
-        cap = self._widgets.get('speed_cap')
+        cap = self._widgets.get("speed_cap")
         if cap is not None:
             value, _unit = self.settings.speed(self._speed_cap_ms)
             cap.set_value(value)
             cap.set_enabled(self._speed_cap_enabled)
 
-        rev_limit = data.get('rev_limit')
-        self._rev_limit = (_number('rev_limit', None, REV_MIN, REV_MAX)
-                           if rev_limit else None)
+        rev_limit = data.get("rev_limit")
+        self._rev_limit = _number("rev_limit", None, REV_MIN, REV_MAX) if rev_limit else None
         self._sync_rev_slider()
 
-        multiplier = _number('torque', 1.0, TORQUE_MIN, TORQUE_MAX)
-        torque = self._widgets.get('torque')
+        multiplier = _number("torque", 1.0, TORQUE_MIN, TORQUE_MAX)
+        torque = self._widgets.get("torque")
         if torque is not None:
             torque.set_value(multiplier)
         self._torque_multiplier = multiplier

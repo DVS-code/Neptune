@@ -1,4 +1,5 @@
 """A small icon-only button, and the pixmap loading/tinting the sidebar nav shares."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
@@ -13,7 +14,7 @@ ICON_SIZE = 17
 
 
 def load_icon(name: str) -> QPixmap | None:
-    path = paths.asset(f'icons/ui/{name}')
+    path = paths.asset(f"icons/ui/{name}")
     if not path:
         return None
     pixmap = QPixmap(path)
@@ -35,7 +36,7 @@ def tinted(pixmap: QPixmap, colour: str) -> QPixmap:
 class IconButton(TransparentToolButton):
     """A round, icon-only button built from a bundled PNG."""
 
-    def __init__(self, icon_name: str = '', tooltip: str = '', parent=None):
+    def __init__(self, icon_name: str = "", tooltip: str = "", parent=None):
         super().__init__(parent)
         self.setFixedSize(SIZE, SIZE)
         self.setIconSize(QSize(ICON_SIZE, ICON_SIZE))

@@ -1,37 +1,38 @@
 """Design tokens and the global stylesheet."""
+
 from __future__ import annotations
 
-BG = '#0a0b0d'
-BG_RAISED = '#101116'
-SURFACE = '#131419'
-SURFACE_HOVER = '#181a20'
-SURFACE_SUNKEN = '#0d0e12'
+BG = "#0a0b0d"
+BG_RAISED = "#101116"
+SURFACE = "#131419"
+SURFACE_HOVER = "#181a20"
+SURFACE_SUNKEN = "#0d0e12"
 
-BORDER = '#22242c'
-BORDER_STRONG = '#2e313b'
-BORDER_FOCUS = '#4a3d6b'
+BORDER = "#22242c"
+BORDER_STRONG = "#2e313b"
+BORDER_FOCUS = "#4a3d6b"
 
-ACCENT = '#a855f7'
-ACCENT_BRIGHT = '#c084fc'
-ACCENT_DEEP = '#7e22ce'
-ACCENT_MUTED = '#2a1d3d'
-ACCENT_GLOW = 'rgba(168, 85, 247, 0.16)'
+ACCENT = "#a855f7"
+ACCENT_BRIGHT = "#c084fc"
+ACCENT_DEEP = "#7e22ce"
+ACCENT_MUTED = "#2a1d3d"
+ACCENT_GLOW = "rgba(168, 85, 247, 0.16)"
 
-TEXT = '#f2f3f5'
-TEXT_MUTED = '#9ba1ad'
-TEXT_FAINT = '#646b78'
-TEXT_ON_ACCENT = '#0f0a17'
+TEXT = "#f2f3f5"
+TEXT_MUTED = "#9ba1ad"
+TEXT_FAINT = "#646b78"
+TEXT_ON_ACCENT = "#0f0a17"
 
-OK = '#4ade80'
-WARN = '#fbbf24'
-ERR = '#f87171'
-INFO = '#60a5fa'
+OK = "#4ade80"
+WARN = "#fbbf24"
+ERR = "#f87171"
+INFO = "#60a5fa"
 
-CURVE_STOCK = '#4b5563'
-CURVE_LIVE = '#c084fc'
-CURVE_FILL_TOP = 'rgba(168, 85, 247, 0.22)'
-CURVE_FILL_BOTTOM = 'rgba(168, 85, 247, 0.02)'
-GRID = '#1c1f27'
+CURVE_STOCK = "#4b5563"
+CURVE_LIVE = "#c084fc"
+CURVE_FILL_TOP = "rgba(168, 85, 247, 0.22)"
+CURVE_FILL_BOTTOM = "rgba(168, 85, 247, 0.02)"
+GRID = "#1c1f27"
 
 FONT_DISPLAY = '"Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI", sans-serif'
 FONT_SMALL = '"Segoe UI Variable Small", "Segoe UI", sans-serif'
@@ -58,7 +59,7 @@ WINDOW_MIN = (985, 631)
 WINDOW_DEFAULT = (1074, 689)
 
 
-UI_FAMILIES = ('Segoe UI Variable Text', 'Segoe UI', 'Tahoma')
+UI_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Tahoma")
 UI_POINT_SIZE = 9
 
 
@@ -79,7 +80,6 @@ def ui_font():
 
     family = next((name for name in UI_FAMILIES if name in installed), UI_FAMILIES[-1])
     font = QFont(family, UI_POINT_SIZE)
-
 
     font.setHintingPreference(QFont.PreferVerticalHinting)
     font.setStyleStrategy(QFont.PreferAntialias)

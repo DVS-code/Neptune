@@ -1,4 +1,5 @@
 """The player's vehicle: discovery, identity and typed live state."""
+
 from __future__ import annotations
 
 import math
@@ -140,8 +141,7 @@ class Vehicle:
         return self.process.set_f32_array(self.engine + O.EngineModel.CURVE, values)
 
     def set_curve_from(self, index: int, values) -> bool:
-        return self.process.set_f32_array(
-            self.engine + O.EngineModel.CURVE + index * 4, values)
+        return self.process.set_f32_array(self.engine + O.EngineModel.CURVE + index * 4, values)
 
     @property
     def boost_raw(self) -> float | None:
@@ -156,8 +156,7 @@ class Vehicle:
 
         values = self.process.f32_array(self.car + O.Supercharger.CEILING_A, 2)
         if not values:
-            values = [self.process.f32(self.car + offset)
-                      for offset in O.Supercharger.CEILINGS]
+            values = [self.process.f32(self.car + offset) for offset in O.Supercharger.CEILINGS]
         values = [value for value in values if value is not None]
         return max(values) if values else None
 
@@ -169,8 +168,7 @@ class Vehicle:
 
     @property
     def boost_absolute(self) -> float | None:
-        values = [value for value in (self.boost_raw, self.boost_raw_blower)
-                  if value is not None]
+        values = [value for value in (self.boost_raw, self.boost_raw_blower) if value is not None]
         return max(values) if values else None
 
     @property
@@ -251,9 +249,8 @@ class Vehicle:
 
     def wheel_write(self, field: int, values) -> bool:
         ok = True
-        for index, value in enumerate(values[:O.Wheels.COUNT]):
-            ok = self.process.set_f32(
-                O.Wheels.addr(self.car, index, field), float(value)) and ok
+        for index, value in enumerate(values[: O.Wheels.COUNT]):
+            ok = self.process.set_f32(O.Wheels.addr(self.car, index, field), float(value)) and ok
         return ok
 
     @property
@@ -265,8 +262,7 @@ class Vehicle:
 
     @property
     def camber(self) -> list[float] | None:
-        """Per-wheel static camber, in degrees. Stored as a half-angle (sin, cos) pair.
-        """
+        """Per-wheel static camber, in degrees. Stored as a half-angle (sin, cos) pair."""
         values = []
         for index in range(O.Wheels.COUNT):
             base = O.Wheels.addr(self.car, index, 0)
@@ -293,11 +289,8 @@ class Vehicle:
         heights = self.ride_height
         radii = self.wheel_radius
         if not heights or not radii or len(heights) != len(radii):
-
-
             return None
-        return [height - radius
-                for height, radius in zip(heights, radii, strict=True)]
+        return [height - radius for height, radius in zip(heights, radii, strict=True)]
 
     def _sso_read(self, address: int) -> str | None:
         """Read one small-string-optimised std::string."""
@@ -307,11 +300,11 @@ class Vehicle:
         length = self.process.read(address + O.CarConfig.STRING_LENGTH, 8)
         if length is None:
             return None
-        count = struct.unpack('<Q', length)[0]
+        count = struct.unpack("<Q", length)[0]
         if count > O.CarConfig.STRING_CAPACITY:
             return None
         try:
-            return raw[:count].decode('ascii')
+            return raw[:count].decode("ascii")
         except UnicodeDecodeError:
             return None
 
@@ -373,10 +366,10 @@ class Vehicle:
         sit in the field, or a car with no turbo would have its estimate scaled by noise.
         """
         block = self.turbo_block()
-        scale = block.get('max_scale')
+        scale = block.get("max_scale")
         if scale is None or scale != scale or scale <= 0.0:
             return 1.0
-        if O.is_naturally_aspirated(block.get('max_boost'), block.get('turbine_limit')):
+        if O.is_naturally_aspirated(block.get("max_boost"), block.get("turbine_limit")):
             return 1.0
         return scale
 
@@ -418,8 +411,6 @@ class Vehicle:
             return ((0.0, 0), (0.0, 0))
 
         per_index = self.rpm_per_index or 100.0
-
-
 
         scale = self.boost_multiplier() * per_index
         body = curve[:-1]
@@ -473,14 +464,18 @@ def resolve_context(process: Process) -> int:
     resolved = O.Chain.CTX
     try:
         from neptune.memory.scanner import ModuleImage
+
         image = ModuleImage.capture(process)
         hits = image.find_all(O.Chain.CTX_SIG, limit=4)
         if len(hits) == 1:
             instruction = hits[0] + O.Chain.CTX_SIG_INSN
             displacement = process.read(hits[0] + O.Chain.CTX_SIG_DISP, 4)
             if displacement:
-                target = instruction + O.Chain.CTX_SIG_INSN_LEN + int.from_bytes(
-                    displacement, 'little', signed=True)
+                target = (
+                    instruction
+                    + O.Chain.CTX_SIG_INSN_LEN
+                    + int.from_bytes(displacement, "little", signed=True)
+                )
                 candidate = target - process.base
                 if 0 < candidate < 0x20000000 and process.pointer(process.base + candidate):
                     resolved = candidate
@@ -498,16 +493,16 @@ def find_vehicles(process: Process) -> tuple[list[Vehicle], str | None]:
     list_slot = process.chain(context, chain.CTX_TO_A, chain.A_TO_MGR, chain.MGR_TO_LIST)
     entity_list = process.pointer(list_slot) if list_slot else None
     if not entity_list:
-        return [], 'No car found. Drive out into the world first.'
+        return [], "No car found. Drive out into the world first."
 
     begin = process.pointer(entity_list + chain.LIST_VEC_BEGIN)
     end_data = process.read(entity_list + chain.LIST_VEC_END, 8)
     if not begin or not end_data:
-        return [], 'No car found. Drive out into the world first.'
+        return [], "No car found. Drive out into the world first."
 
-    end = struct.unpack('<Q', end_data)[0]
+    end = struct.unpack("<Q", end_data)[0]
     if end < begin or (end - begin) % 8 or (end - begin) > 0x100000:
-        return [], 'No car found. Drive out into the world first.'
+        return [], "No car found. Drive out into the world first."
 
     vehicles = []
     rejected = 0
@@ -525,5 +520,5 @@ def find_vehicles(process: Process) -> tuple[list[Vehicle], str | None]:
             rejected += 1
 
     if not vehicles and rejected:
-        return [], 'A car was found but could not be read on this game build.'
+        return [], "A car was found but could not be read on this game build."
     return vehicles, None

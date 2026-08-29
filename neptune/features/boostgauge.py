@@ -1,4 +1,5 @@
 """Boost Gauge: a floating dial that sits over the game."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout
@@ -21,24 +22,26 @@ from neptune.ui.widgets.sliderrow import SliderRow
 PREVIEW_SIZE = 168
 PREVIEW_VALUE = 12.4
 
-HINT_SHOW = 'Puts the gauge on top of the game. It follows the game window.'
-HINT_SIZE = 'How large the gauge is drawn.'
-HINT_POSITION = 'Unlock the gauge to drag it anywhere on the picture with the mouse.'
-HINT_LOCK = ('Locked, clicks pass straight through to the game. '
-             'Unlock it to drag the gauge, then lock it again.')
-HINT_GLOW = 'Adds a soft halo behind the needle and numbers.'
-HINT_PEAK = 'Marks the highest boost seen since the car loaded.'
-HINT_GEAR = 'Shows the gear you are in under the reading.'
-HINT_AUTO_RANGE = 'Sets the dial to suit how much boost the car can make.'
-NOTE_OFFLINE = 'Attach to the game to show the gauge.'
+HINT_SHOW = "Puts the gauge on top of the game. It follows the game window."
+HINT_SIZE = "How large the gauge is drawn."
+HINT_POSITION = "Unlock the gauge to drag it anywhere on the picture with the mouse."
+HINT_LOCK = (
+    "Locked, clicks pass straight through to the game. "
+    "Unlock it to drag the gauge, then lock it again."
+)
+HINT_GLOW = "Adds a soft halo behind the needle and numbers."
+HINT_PEAK = "Marks the highest boost seen since the car loaded."
+HINT_GEAR = "Shows the gear you are in under the reading."
+HINT_AUTO_RANGE = "Sets the dial to suit how much boost the car can make."
+NOTE_OFFLINE = "Attach to the game to show the gauge."
 
 
 class BoostGaugeModule(FeatureModule):
-    name = 'boostgauge'
-    title = 'Boost Gauge'
-    subtitle = 'A floating boost gauge on top of the game.'
-    icon = 'boost.png'
-    group = 'Vehicle'
+    name = "boostgauge"
+    title = "Boost Gauge"
+    subtitle = "A floating boost gauge on top of the game."
+    icon = "boost.png"
+    group = "Vehicle"
     order = 40
     always_refresh = True
 
@@ -48,8 +51,8 @@ class BoostGaugeModule(FeatureModule):
 
         self._overlay: GaugeOverlay | None = None
         self._enabled = False
-        self._mode = 'Dial'
-        self._accent = 'blue'
+        self._mode = "Dial"
+        self._accent = "blue"
         self._size = DEFAULT_SIZE
         self._position = DEFAULT_POSITION
         self._glow = True
@@ -62,17 +65,21 @@ class BoostGaugeModule(FeatureModule):
         self._widgets: dict = {}
 
     def _sync_controls(self) -> None:
-        for key, value in (('mode', self._mode), ('accent', self._accent.title())):
+        for key, value in (("mode", self._mode), ("accent", self._accent.title())):
             widget = self._widgets.get(key)
             if widget is not None:
                 widget.set_value(value)
-        size = self._widgets.get('size')
+        size = self._widgets.get("size")
         if size is not None:
             size.set_value(self._size)
-        for key, value in (('enabled', self._enabled), ('glow', self._glow),
-                           ('peak', self._peak), ('gear', self._gear),
-                           ('locked', self._locked),
-                           ('auto_range', self._auto_range)):
+        for key, value in (
+            ("enabled", self._enabled),
+            ("glow", self._glow),
+            ("peak", self._peak),
+            ("gear", self._gear),
+            ("locked", self._locked),
+            ("auto_range", self._auto_range),
+        ):
             widget = self._widgets.get(key)
             if widget is not None:
                 widget.set_value(value)
@@ -140,11 +147,11 @@ class BoostGaugeModule(FeatureModule):
         face.glow = self._glow
         face.show_peak = self._peak
         face.show_gear = self._gear
-        face.set_unit(self.settings.get('pressure_unit'))
+        face.set_unit(self.settings.get("pressure_unit"))
         face.update()
 
     def _restyle(self) -> None:
-        preview = self._widgets.get('preview')
+        preview = self._widgets.get("preview")
         if preview is not None:
             self._apply_style(preview)
             preview.set_value(PREVIEW_VALUE, gear=3)
@@ -175,79 +182,82 @@ class BoostGaugeModule(FeatureModule):
             self._overlay.set_size(self._size)
 
     def build_page(self, page) -> None:
-        show_card = page.add_card('Gauge')
+        show_card = page.add_card("Gauge")
 
-        enabled = ToggleRow('Show the gauge', False, hint=HINT_SHOW)
+        enabled = ToggleRow("Show the gauge", False, hint=HINT_SHOW)
         enabled.toggle.toggled_value.connect(self._on_enabled)
-        self._widgets['enabled'] = enabled
+        self._widgets["enabled"] = enabled
         show_card.add(enabled)
 
         mode = Segmented(list(MODES), self._mode)
         mode.changed.connect(self._on_mode)
-        self._widgets['mode'] = mode
-        show_card.add(FieldRow('Style', mode))
+        self._widgets["mode"] = mode
+        show_card.add(FieldRow("Style", mode))
 
-        style_card = page.add_card('Look')
+        style_card = page.add_card("Look")
 
         preview_row = QHBoxLayout()
         preview_row.addStretch(1)
         preview = GaugeFace()
         preview.setFixedSize(*dimensions_for(self._mode, PREVIEW_SIZE))
         preview.set_value(PREVIEW_VALUE, gear=3)
-        self._widgets['preview'] = preview
+        self._widgets["preview"] = preview
         preview_row.addWidget(preview)
         preview_row.addStretch(1)
         style_card.add_layout(preview_row)
 
-        colours = Segmented([name.title() for name in ACCENT_ORDER],
-                            self._accent.title())
+        colours = Segmented([name.title() for name in ACCENT_ORDER], self._accent.title())
         colours.changed.connect(self._on_accent)
-        self._widgets['accent'] = colours
-        style_card.add(FieldRow('Colour', colours))
+        self._widgets["accent"] = colours
+        style_card.add(FieldRow("Colour", colours))
 
-        glow = ToggleRow('Glow', True, hint=HINT_GLOW)
+        glow = ToggleRow("Glow", True, hint=HINT_GLOW)
         glow.toggle.toggled_value.connect(
-            lambda value: (setattr(self, '_glow', bool(value)), self._restyle()))
-        self._widgets['glow'] = glow
+            lambda value: (setattr(self, "_glow", bool(value)), self._restyle())
+        )
+        self._widgets["glow"] = glow
         style_card.add(glow)
 
-        peak = ToggleRow('Mark peak boost', True, hint=HINT_PEAK)
+        peak = ToggleRow("Mark peak boost", True, hint=HINT_PEAK)
         peak.toggle.toggled_value.connect(
-            lambda value: (setattr(self, '_peak', bool(value)), self._restyle()))
-        self._widgets['peak'] = peak
+            lambda value: (setattr(self, "_peak", bool(value)), self._restyle())
+        )
+        self._widgets["peak"] = peak
         style_card.add(peak)
 
-        gear = ToggleRow('Show gear', False, hint=HINT_GEAR)
+        gear = ToggleRow("Show gear", False, hint=HINT_GEAR)
         gear.toggle.toggled_value.connect(
-            lambda value: (setattr(self, '_gear', bool(value)), self._restyle()))
-        self._widgets['gear'] = gear
+            lambda value: (setattr(self, "_gear", bool(value)), self._restyle())
+        )
+        self._widgets["gear"] = gear
         style_card.add(gear)
 
-        place_card = page.add_card('Placement', HINT_POSITION)
+        place_card = page.add_card("Placement", HINT_POSITION)
 
-        size = SliderRow('Size', MIN_SIZE, MAX_SIZE, DEFAULT_SIZE, step=10,
-                         decimals=0, unit='px', hint=HINT_SIZE)
+        size = SliderRow(
+            "Size", MIN_SIZE, MAX_SIZE, DEFAULT_SIZE, step=10, decimals=0, unit="px", hint=HINT_SIZE
+        )
         size.changed.connect(self._on_size)
-        self._widgets['size'] = size
+        self._widgets["size"] = size
         place_card.add(size)
 
-        locked = ToggleRow('Lock in place', True, hint=HINT_LOCK)
+        locked = ToggleRow("Lock in place", True, hint=HINT_LOCK)
         locked.toggle.toggled_value.connect(self._on_locked)
-        self._widgets['locked'] = locked
+        self._widgets["locked"] = locked
         place_card.add(locked)
 
-        reset = Button('Move back to the corner')
+        reset = Button("Move back to the corner")
         reset.clicked.connect(lambda: self._jump_to(*DEFAULT_POSITION))
         place_card.add(reset)
 
-        scale_card = page.add_card('Scale')
-        auto = ToggleRow('Match the car', True, hint=HINT_AUTO_RANGE)
+        scale_card = page.add_card("Scale")
+        auto = ToggleRow("Match the car", True, hint=HINT_AUTO_RANGE)
         auto.toggle.toggled_value.connect(self._on_auto_range)
-        self._widgets['auto_range'] = auto
+        self._widgets["auto_range"] = auto
         scale_card.add(auto)
 
-        banner = Banner(NOTE_OFFLINE, 'info')
-        self._widgets['banner'] = banner
+        banner = Banner(NOTE_OFFLINE, "info")
+        self._widgets["banner"] = banner
         page.add(banner)
 
         self._restyle()
@@ -278,30 +288,30 @@ class BoostGaugeModule(FeatureModule):
         if self._overlay is not None and self._overlay.vehicle() is not vehicle:
             self._overlay.set_vehicle(vehicle)
 
-        banner = self._widgets.get('banner')
+        banner = self._widgets.get("banner")
         if banner is None:
             return
         if vehicle is None:
-            banner.set(NOTE_OFFLINE, 'info')
+            banner.set(NOTE_OFFLINE, "info")
         elif not self._enabled:
             banner.setVisible(False)
         elif not self._locked:
-            banner.set('Drag the gauge where you want it, then lock it again.', 'info')
+            banner.set("Drag the gauge where you want it, then lock it again.", "info")
         else:
             banner.setVisible(False)
 
     def save_state(self) -> dict:
         return {
-            'enabled': self._enabled,
-            'mode': self._mode,
-            'accent': self._accent,
-            'size': self._size,
-            'position': list(self._position),
-            'glow': self._glow,
-            'peak': self._peak,
-            'gear': self._gear,
-            'locked': self._locked,
-            'auto_range': self._auto_range,
+            "enabled": self._enabled,
+            "mode": self._mode,
+            "accent": self._accent,
+            "size": self._size,
+            "position": list(self._position),
+            "glow": self._glow,
+            "peak": self._peak,
+            "gear": self._gear,
+            "locked": self._locked,
+            "auto_range": self._auto_range,
         }
 
     def load_state(self, data: dict) -> None:
@@ -314,34 +324,32 @@ class BoostGaugeModule(FeatureModule):
         """
         data = data or {}
 
-        mode = data.get('mode', 'Dial')
-        self._mode = mode if mode in MODES else 'Dial'
+        mode = data.get("mode", "Dial")
+        self._mode = mode if mode in MODES else "Dial"
 
-        accent = data.get('accent', 'blue')
-        self._accent = accent if accent in ACCENT_ORDER else 'blue'
-
-
+        accent = data.get("accent", "blue")
+        self._accent = accent if accent in ACCENT_ORDER else "blue"
 
         try:
-            size = float(data.get('size', DEFAULT_SIZE))
+            size = float(data.get("size", DEFAULT_SIZE))
             if size != size:
-                raise ValueError('nan')
+                raise ValueError("nan")
             self._size = max(MIN_SIZE, min(MAX_SIZE, int(size)))
         except (TypeError, ValueError, OverflowError):
             self._size = DEFAULT_SIZE
 
-        position = data.get('position') or list(DEFAULT_POSITION)
+        position = data.get("position") or list(DEFAULT_POSITION)
         try:
             self._position = (float(position[0]), float(position[1]))
         except (TypeError, ValueError, IndexError):
             self._position = DEFAULT_POSITION
         if any(value != value for value in self._position):
             self._position = DEFAULT_POSITION
-        self._glow = bool(data.get('glow', True))
-        self._peak = bool(data.get('peak', True))
-        self._gear = bool(data.get('gear', False))
-        self._locked = bool(data.get('locked', True))
-        self._auto_range = bool(data.get('auto_range', True))
+        self._glow = bool(data.get("glow", True))
+        self._peak = bool(data.get("peak", True))
+        self._gear = bool(data.get("gear", False))
+        self._locked = bool(data.get("locked", True))
+        self._auto_range = bool(data.get("auto_range", True))
 
         self._controls_dirty = True
 
@@ -353,8 +361,8 @@ class BoostGaugeModule(FeatureModule):
             self._overlay.set_auto_range(self._auto_range)
         self._restyle()
 
-        wanted = bool(data.get('enabled', False))
-        toggle = self._widgets.get('enabled')
+        wanted = bool(data.get("enabled", False))
+        toggle = self._widgets.get("enabled")
         if toggle is not None:
             toggle.set_value(wanted)
         self._on_enabled(wanted)

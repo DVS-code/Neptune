@@ -1,4 +1,5 @@
 """A blurred, dimmed overlay that hosts one Page above the current shell content."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
@@ -40,7 +41,6 @@ def _blurred(source: QPixmap, radius: float) -> QPixmap:
 
 
 class _OpaqueCard(CardWidget):
-
     def _normalBackgroundColor(self) -> QColor:
         return QColor(T.BG)
 

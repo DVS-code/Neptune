@@ -59,10 +59,6 @@ class Process:
         if not pid:
             raise ProcessError("Forza Horizon 6 is not running.")
 
-
-
-
-
         try:
             kernel32.enable_debug_privileges()
         except OSError:
@@ -72,9 +68,7 @@ class Process:
         )
         if not handle:
             if not is_admin():
-                raise ProcessError(
-                    "Could not open the game. Run Neptune as administrator."
-                )
+                raise ProcessError("Could not open the game. Run Neptune as administrator.")
             raise ProcessError("Could not open the game process.")
 
         base = _module_base(pid, exe_name, handle)
@@ -87,8 +81,6 @@ class Process:
         return cls(pid, handle, base, exe_name)
 
     def close(self) -> None:
-
-
 
         if self.handle:
             _close(self.handle)
@@ -118,9 +110,7 @@ class Process:
             return None
         buffer = (ctypes.c_char * size)()
         try:
-            read = kernel32.ReadProcessMemory(
-                self.handle, ctypes.c_void_p(address), buffer, size
-            )
+            read = kernel32.ReadProcessMemory(self.handle, ctypes.c_void_p(address), buffer, size)
         except OSError:
             return None
         if read != size:
@@ -226,9 +216,6 @@ class Process:
                 handles.append(thread)
             yield len(handles)
         finally:
-
-
-
             for thread in handles:
                 try:
                     kernel32.ResumeThread(thread)
@@ -338,9 +325,7 @@ def _find_pid(exe_name: str) -> int | None:
 def _module_base(pid: int, exe_name: str, handle: int = 0) -> int | None:
     wanted = exe_name.lower().rsplit(".", 1)[0].encode()
     try:
-        snapshot = kernel32.CreateToolhelp32Snapshot(
-            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid
-        )
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
     except OSError:
         snapshot = -1
     if snapshot != -1:
@@ -370,11 +355,7 @@ def _module_base_psapi(pid: int, exe_name: str, handle: int = 0) -> int | None:
     try:
         psapi = ctypes.WinDLL("psapi", use_last_error=True)
         borrowed = bool(handle)
-        proc = (
-            handle
-            or _open_process(PROCESS_RUNTIME_ACCESS, pid)
-            or _open_process(0x0410, pid)
-        )
+        proc = handle or _open_process(PROCESS_RUNTIME_ACCESS, pid) or _open_process(0x0410, pid)
         if not proc:
             return None
         try:

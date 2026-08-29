@@ -1,8 +1,9 @@
 """Address table and unit conversions."""
+
 from __future__ import annotations
 
-GAME_EXE = 'forzahorizon6.exe'
-GAME_BUILD = '430.771'
+GAME_EXE = "forzahorizon6.exe"
+GAME_BUILD = "430.771"
 
 RAD_TO_RPM = 9.549296
 
@@ -38,8 +39,7 @@ def boost_to_gauge(raw: float) -> float:
 
 class Chain:
     CTX = 0xA894868
-    CTX_SIG = ('06 E8 ? ? ? ? 90 48 8D 4D C0 E8 ? ? ? ? '
-               '48 8B 15 ? ? ? ? 48 8B 82 A8 07 00 00')
+    CTX_SIG = "06 E8 ? ? ? ? 90 48 8D 4D C0 E8 ? ? ? ? 48 8B 15 ? ? ? ? 48 8B 82 A8 07 00 00"
     CTX_SIG_INSN = 16
     CTX_SIG_DISP = CTX_SIG_INSN + 3
     CTX_SIG_INSN_LEN = 7
@@ -60,7 +60,6 @@ class Car:
     LIVE_BOOST_SC = 0x1E4
     GEAR = 0x0B88
     SPEED = 0x14EC
-
 
     THROTTLE = 0x1490
     BRAKE = 0x1494
@@ -93,10 +92,7 @@ class Turbo:
     MIN_BOOST = 0x0AC8
     MAX_BOOST = 0x0ACC
 
-    FIELDS = ('low_airflow', 'max_scale', 'power_max',
-              'turbine_limit', 'min_boost', 'max_boost')
-
-
+    FIELDS = ("low_airflow", "max_scale", "power_max", "turbine_limit", "min_boost", "max_boost")
 
     BLOCK = LOW_AIRFLOW
     BLOCK_COUNT = len(FIELDS)
@@ -116,10 +112,9 @@ class Wheels:
     BASE = 0x28A8
     STRIDE = 0x0AC0
     COUNT = 4
-    ORDER = ('FL', 'FR', 'RR', 'RL')
+    ORDER = ("FL", "FR", "RR", "RL")
     RIDE_HEIGHT = 0x02E0
     DROOP_LIMIT = 0x02F0
-
 
     RADIUS = 0x0234
     TRAVEL = 0x0018
@@ -169,11 +164,11 @@ class Config:
 
 
 ASPIRATION_KIND = {
-    5: 'single',
-    6: 'twin',
-    7: 'twin',
-    8: 'supercharger',
-    9: 'supercharger',
+    5: "single",
+    6: "twin",
+    7: "twin",
+    8: "supercharger",
+    9: "supercharger",
 }
 
 
@@ -184,9 +179,12 @@ def is_supercharged(sc_boost: float | None, sc_ceiling: float | None = None) -> 
     return sc_boost is not None and sc_boost > threshold
 
 
-def is_naturally_aspirated(max_boost: float | None, turbine_limit: float | None = None,
-                           sc_boost: float | None = None,
-                           sc_ceiling: float | None = None) -> bool:
+def is_naturally_aspirated(
+    max_boost: float | None,
+    turbine_limit: float | None = None,
+    sc_boost: float | None = None,
+    sc_ceiling: float | None = None,
+) -> bool:
     if is_supercharged(sc_boost, sc_ceiling):
         return False
     if max_boost is None:
@@ -196,18 +194,22 @@ def is_naturally_aspirated(max_boost: float | None, turbine_limit: float | None 
     return turbine_limit is None or abs(turbine_limit) < 1e-6
 
 
-def aspiration_label(aspiration_type: int | None, max_boost: float | None = None,
-                     turbine_limit: float | None = None, sc_boost: float | None = None,
-                     sc_ceiling: float | None = None) -> str:
+def aspiration_label(
+    aspiration_type: int | None,
+    max_boost: float | None = None,
+    turbine_limit: float | None = None,
+    sc_boost: float | None = None,
+    sc_ceiling: float | None = None,
+) -> str:
     if is_supercharged(sc_boost, sc_ceiling):
-        return 'Supercharged'
+        return "Supercharged"
     if is_naturally_aspirated(max_boost, turbine_limit):
-        return 'Naturally aspirated'
+        return "Naturally aspirated"
     kind = ASPIRATION_KIND.get(aspiration_type)
-    if kind == 'twin':
-        return 'Twin turbo'
-    if kind == 'supercharger':
-        return 'Supercharged'
-    if kind == 'single':
-        return 'Turbocharged'
-    return 'Unknown'
+    if kind == "twin":
+        return "Twin turbo"
+    if kind == "supercharger":
+        return "Supercharged"
+    if kind == "single":
+        return "Turbocharged"
+    return "Unknown"

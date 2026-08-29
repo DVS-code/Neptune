@@ -1,4 +1,5 @@
 """A horizontal 0..1 slider, backed by Fluent's Slider."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -46,8 +47,7 @@ class Slider(FluentSlider):
         self.moved.emit(value / RESOLUTION)
 
     def wheelEvent(self, event) -> None:
-        """Only respond to the wheel while focused — e.g. right after a click or drag.
-        """
+        """Only respond to the wheel while focused — e.g. right after a click or drag."""
         if not self.hasFocus():
             event.ignore()
             return

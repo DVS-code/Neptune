@@ -1,13 +1,5 @@
 """Recreation of some kernel32 functions using ntdll functions."""
 
-
-
-
-
-
-
-
-
 import ctypes
 import os
 from ctypes import wintypes
@@ -197,9 +189,7 @@ TH32CS_SNAPTHREAD = 0x00000004
 TH32CS_SNAPMODULE = 0x00000008
 TH32CS_SNAPMODULE32 = 0x00000010
 TH32CS_INHERIT = 0x80000000
-TH32CS_SNAPALL = (
-    TH32CS_SNAPHEAPLIST | TH32CS_SNAPPROCESS | TH32CS_SNAPTHREAD | TH32CS_SNAPMODULE
-)
+TH32CS_SNAPALL = TH32CS_SNAPHEAPLIST | TH32CS_SNAPPROCESS | TH32CS_SNAPTHREAD | TH32CS_SNAPMODULE
 
 MAX_PATH = 260
 MAX_MODULE_NAME32 = 255
@@ -214,13 +204,12 @@ STATUS_NOT_ALL_ASSIGNED = 0x00000106
 ERROR_NOT_ALL_ASSIGNED = 1300
 ERROR_INVALID_HANDLE = 6
 
-PROCESS_NAME_NATIVE       = 0x00000001
+PROCESS_NAME_NATIVE = 0x00000001
 
 ProcessImageFileName = 27
-ProcessImageFileNameWin32 = 43   
+ProcessImageFileNameWin32 = 43
 
 NtCurrentProcess = wintypes.HANDLE(-1)
-
 
 
 class PROCESSENTRY32(ctypes.Structure):
@@ -314,9 +303,6 @@ ntdll.NtOpenProcess.argtypes = [
 
 ntdll.RtlNtStatusToDosError.restype = wintypes.ULONG
 ntdll.RtlNtStatusToDosError.argtypes = [NTSTATUS]
-
-
-
 
 
 ntdll.NtProtectVirtualMemory.restype = NTSTATUS
@@ -480,9 +466,7 @@ def _query_system_processes():
         entry = _SYSTEM_PROCESS_INFORMATION.from_address(base_address + offset)
         name = ""
         if entry.ImageName.Buffer:
-            name = ctypes.wstring_at(
-                entry.ImageName.Buffer, entry.ImageName.Length // 2
-            )
+            name = ctypes.wstring_at(entry.ImageName.Buffer, entry.ImageName.Length // 2)
         processes.append(
             {
                 "pid": entry.UniqueProcessId or 0,
@@ -504,9 +488,7 @@ def _query_system_threads():
     base_address = ctypes.addressof(buf)
     while True:
         entry = _SYSTEM_PROCESS_INFORMATION.from_address(base_address + offset)
-        threads_address = (
-            base_address + offset + _SYSTEM_PROCESS_INFORMATION.Threads.offset
-        )
+        threads_address = base_address + offset + _SYSTEM_PROCESS_INFORMATION.Threads.offset
         for i in range(entry.NumberOfThreads):
             thread = _SYSTEM_THREAD_INFORMATION.from_address(
                 threads_address + i * ctypes.sizeof(_SYSTEM_THREAD_INFORMATION)
@@ -548,9 +530,7 @@ def _query_process_modules(pid):
         for _ in range(4096):
             if not current or current == list_head:
                 break
-            entry = _read_struct(
-                hProcess, current - entry_link_offset, _LDR_DATA_TABLE_ENTRY
-            )
+            entry = _read_struct(hProcess, current - entry_link_offset, _LDR_DATA_TABLE_ENTRY)
             modules.append(
                 {
                     "pid": pid,
@@ -628,16 +608,12 @@ def _fill_process_entry(pe32, proc):
 def Process32First(hSnapshot, lppe):
     state = _get_snapshot_state(hSnapshot)
     state["proc_index"] = 0
-    return _snapshot_advance(
-        state["processes"], "proc_index", state, lppe, _fill_process_entry
-    )
+    return _snapshot_advance(state["processes"], "proc_index", state, lppe, _fill_process_entry)
 
 
 def Process32Next(hSnapshot, lppe):
     state = _get_snapshot_state(hSnapshot)
-    return _snapshot_advance(
-        state["processes"], "proc_index", state, lppe, _fill_process_entry
-    )
+    return _snapshot_advance(state["processes"], "proc_index", state, lppe, _fill_process_entry)
 
 
 def _fill_module_entry(me32, mod):
@@ -655,16 +631,12 @@ def _fill_module_entry(me32, mod):
 def Module32First(hSnapshot, lpme):
     state = _get_snapshot_state(hSnapshot)
     state["mod_index"] = 0
-    return _snapshot_advance(
-        state["modules"], "mod_index", state, lpme, _fill_module_entry
-    )
+    return _snapshot_advance(state["modules"], "mod_index", state, lpme, _fill_module_entry)
 
 
 def Module32Next(hSnapshot, lpme):
     state = _get_snapshot_state(hSnapshot)
-    return _snapshot_advance(
-        state["modules"], "mod_index", state, lpme, _fill_module_entry
-    )
+    return _snapshot_advance(state["modules"], "mod_index", state, lpme, _fill_module_entry)
 
 
 def _fill_thread_entry(te32, thread):
@@ -679,16 +651,12 @@ def _fill_thread_entry(te32, thread):
 def Thread32First(hSnapshot, lpte):
     state = _get_snapshot_state(hSnapshot)
     state["thread_index"] = 0
-    return _snapshot_advance(
-        state["threads"], "thread_index", state, lpte, _fill_thread_entry
-    )
+    return _snapshot_advance(state["threads"], "thread_index", state, lpte, _fill_thread_entry)
 
 
 def Thread32Next(hSnapshot, lpte):
     state = _get_snapshot_state(hSnapshot)
-    return _snapshot_advance(
-        state["threads"], "thread_index", state, lpte, _fill_thread_entry
-    )
+    return _snapshot_advance(state["threads"], "thread_index", state, lpte, _fill_thread_entry)
 
 
 def CloseHandle(hObject):
@@ -814,17 +782,18 @@ def enable_debug_privileges():
     _nt_check(status)
     return bool(previously_enabled.value)
 
+
 def QueryFullProcessImageNameW(hProcess, dwFlags=0):
     if dwFlags & ~PROCESS_NAME_NATIVE:
         raise ctypes.WinError(87)  # ERROR_INVALID_PARAMETER
 
-    info_class = ProcessImageFileName if (dwFlags & PROCESS_NAME_NATIVE) else ProcessImageFileNameWin32
+    info_class = (
+        ProcessImageFileName if (dwFlags & PROCESS_NAME_NATIVE) else ProcessImageFileNameWin32
+    )
     size = 4096
     buf = ctypes.create_string_buffer(size)
     ret_len = wintypes.ULONG(0)
-    status = ntdll.NtQueryInformationProcess(
-        hProcess, info_class, buf, size, ctypes.byref(ret_len)
-    )
+    status = ntdll.NtQueryInformationProcess(hProcess, info_class, buf, size, ctypes.byref(ret_len))
     if status == STATUS_INFO_LENGTH_MISMATCH:
         size = ret_len.value
         buf = ctypes.create_string_buffer(size)

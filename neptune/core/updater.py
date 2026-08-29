@@ -12,6 +12,7 @@ offline.
 ⚠️ The swap only applies to a FROZEN build. Running from source has no single exe to replace, so the
 check still reports but the install path is refused and the releases page is opened instead.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,16 +26,16 @@ import urllib.request
 
 from neptune import __version__
 
-REPO = 'DVS-code/Neptune'
-API_LATEST = f'https://api.github.com/repos/{REPO}/releases/latest'
-RELEASES_PAGE = f'https://github.com/{REPO}/releases/latest'
+REPO = "DVS-code/Neptune"
+API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 TIMEOUT_SECONDS = 15
 
 
-UP_TO_DATE = 'up_to_date'
-UPDATE_AVAILABLE = 'update_available'
-NO_RELEASES = 'no_releases'
-NETWORK_ERROR = 'network_error'
+UP_TO_DATE = "up_to_date"
+UPDATE_AVAILABLE = "update_available"
+NO_RELEASES = "no_releases"
+NETWORK_ERROR = "network_error"
 
 
 def parse_version(text: str) -> tuple[int, ...] | None:
@@ -45,11 +46,11 @@ def parse_version(text: str) -> tuple[int, ...] | None:
     """
     if not text:
         return None
-    cleaned = text.strip().lstrip('vV')
-    cleaned = cleaned.split('-', 1)[0].split('+', 1)[0]
-    if not re.fullmatch(r'\d+(\.\d+)*', cleaned):
+    cleaned = text.strip().lstrip("vV")
+    cleaned = cleaned.split("-", 1)[0].split("+", 1)[0]
+    if not re.fullmatch(r"\d+(\.\d+)*", cleaned):
         return None
-    return tuple(int(part) for part in cleaned.split('.'))
+    return tuple(int(part) for part in cleaned.split("."))
 
 
 def _pad(version: tuple[int, ...], length: int) -> tuple[int, ...]:
@@ -62,7 +63,7 @@ def is_newer(candidate: tuple[int, ...], current: tuple[int, ...]) -> bool:
 
 
 def frozen() -> bool:
-    return bool(getattr(sys, 'frozen', False))
+    return bool(getattr(sys, "frozen", False))
 
 
 class UpdateInfo:
@@ -79,22 +80,22 @@ class UpdateInfo:
 def check(timeout: int = TIMEOUT_SECONDS) -> tuple[str, UpdateInfo | None]:
     """Ask GitHub for the latest release. Never raises."""
     try:
-        request = urllib.request.Request(API_LATEST, headers={
-
-            'User-Agent': f'Neptune/{__version__}',
-            'Accept': 'application/vnd.github+json',
-        })
+        request = urllib.request.Request(
+            API_LATEST,
+            headers={
+                "User-Agent": f"Neptune/{__version__}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode('utf-8', 'replace'))
+            payload = json.loads(response.read().decode("utf-8", "replace"))
     except Exception:
-
-
         return NETWORK_ERROR, None
 
-    if payload.get('draft') or payload.get('prerelease'):
+    if payload.get("draft") or payload.get("prerelease"):
         return NO_RELEASES, None
 
-    tag = payload.get('tag_name') or ''
+    tag = payload.get("tag_name") or ""
     latest = parse_version(tag)
     current = parse_version(__version__)
     if latest is None or current is None:
@@ -102,22 +103,21 @@ def check(timeout: int = TIMEOUT_SECONDS) -> tuple[str, UpdateInfo | None]:
     if not is_newer(latest, current):
         return UP_TO_DATE, None
 
-
     url = name = None
-    for asset in payload.get('assets') or []:
-        asset_name = asset.get('name') or ''
-        asset_url = asset.get('browser_download_url') or ''
-        if asset_name.lower().endswith('.exe'):
+    for asset in payload.get("assets") or []:
+        asset_name = asset.get("name") or ""
+        asset_url = asset.get("browser_download_url") or ""
+        if asset_name.lower().endswith(".exe"):
             url, name = asset_url, asset_name
             break
-        if url is None and asset_name.lower().endswith('.zip'):
+        if url is None and asset_name.lower().endswith(".zip"):
             url, name = asset_url, asset_name
     if not url or not name:
         return NO_RELEASES, None
 
     return UPDATE_AVAILABLE, UpdateInfo(
-        '.'.join(str(part) for part in latest), tag,
-        payload.get('body') or '', url, name)
+        ".".join(str(part) for part in latest), tag, payload.get("body") or "", url, name
+    )
 
 
 def check_async(callback) -> None:
@@ -126,18 +126,20 @@ def check_async(callback) -> None:
     ⚠️ `callback` is invoked on a WORKER thread. A Qt caller must marshal onto the GUI thread
     before touching widgets.
     """
+
     def run():
         try:
             callback(*check())
         except Exception:
             pass
 
-    threading.Thread(target=run, daemon=True, name='neptune-update-check').start()
+    threading.Thread(target=run, daemon=True, name="neptune-update-check").start()
 
 
 def open_releases_page() -> None:
     try:
         import webbrowser
+
         webbrowser.open(RELEASES_PAGE)
     except Exception:
         pass
@@ -149,23 +151,25 @@ def download_and_apply(info: UpdateInfo, progress=None) -> bool:
     The running exe cannot overwrite itself while it is running, so a detached script waits for this
     process to exit, copies the new file over the old one, relaunches, and deletes itself.
     """
-    if not frozen() or not info.asset.lower().endswith('.exe'):
-
+    if not frozen() or not info.asset.lower().endswith(".exe"):
         open_releases_page()
         return False
 
     try:
         current = os.path.abspath(sys.executable)
         folder = os.path.dirname(current)
-        staged = os.path.join(folder, f'Neptune.update-{info.version}.exe')
+        staged = os.path.join(folder, f"Neptune.update-{info.version}.exe")
 
-        request = urllib.request.Request(info.url, headers={
-            'User-Agent': f'Neptune/{__version__}',
-        })
+        request = urllib.request.Request(
+            info.url,
+            headers={
+                "User-Agent": f"Neptune/{__version__}",
+            },
+        )
         with urllib.request.urlopen(request, timeout=60) as response:
-            total = int(response.headers.get('Content-Length') or 0)
+            total = int(response.headers.get("Content-Length") or 0)
             done = 0
-            with open(staged, 'wb') as handle:
+            with open(staged, "wb") as handle:
                 while True:
                     chunk = response.read(64 * 1024)
                     if not chunk:
@@ -190,30 +194,29 @@ def download_and_apply(info: UpdateInfo, progress=None) -> bool:
 def _write_swap_script(current: str, staged: str) -> None:
     """A detached .cmd that waits for us to exit, swaps the exe, relaunches, then self-deletes."""
     pid = os.getpid()
-    handle, path = tempfile.mkstemp(prefix='neptune_update_', suffix='.cmd')
+    handle, path = tempfile.mkstemp(prefix="neptune_update_", suffix=".cmd")
     os.close(handle)
     body = (
-        '@echo off\r\n'
-        ':waitloop\r\n'
+        "@echo off\r\n"
+        ":waitloop\r\n"
         f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul\r\n'
-        'if not errorlevel 1 (\r\n'
-        '  ping -n 2 127.0.0.1 >nul\r\n'
-        '  goto waitloop\r\n'
-        ')\r\n'
-        'set /a tries=0\r\n'
-        ':copyloop\r\n'
+        "if not errorlevel 1 (\r\n"
+        "  ping -n 2 127.0.0.1 >nul\r\n"
+        "  goto waitloop\r\n"
+        ")\r\n"
+        "set /a tries=0\r\n"
+        ":copyloop\r\n"
         f'copy /y "{staged}" "{current}" >nul\r\n'
-        'if errorlevel 1 (\r\n'
-        '  set /a tries+=1\r\n'
-        '  if %tries% lss 10 ( ping -n 2 127.0.0.1 >nul & goto copyloop )\r\n'
-        ')\r\n'
+        "if errorlevel 1 (\r\n"
+        "  set /a tries+=1\r\n"
+        "  if %tries% lss 10 ( ping -n 2 127.0.0.1 >nul & goto copyloop )\r\n"
+        ")\r\n"
         f'del /q "{staged}" >nul 2>&1\r\n'
         f'start "" "{current}"\r\n'
         'del /q "%~f0" >nul 2>&1\r\n'
     )
-    with open(path, 'w', encoding='ascii', errors='replace') as script:
+    with open(path, "w", encoding="ascii", errors="replace") as script:
         script.write(body)
 
     creation = 0x08000000 | 0x00000008
-    subprocess.Popen(['cmd.exe', '/c', path], creationflags=creation,
-                     close_fds=True)
+    subprocess.Popen(["cmd.exe", "/c", path], creationflags=creation, close_fds=True)

@@ -1,4 +1,5 @@
 """Neptune entry point."""
+
 from __future__ import annotations
 
 import sys
@@ -24,7 +25,7 @@ from neptune.features.turbo import TurboModule
 from neptune.ui import theme as T
 from neptune.ui.shell import Shell
 
-APP_ID = 'Neptune.FH6.Tool'
+APP_ID = "Neptune.FH6.Tool"
 SPLASH_WIDTH = 420
 
 
@@ -48,19 +49,21 @@ def build_registry(settings: Settings) -> ModuleRegistry:
 
 
 def main() -> int:
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         try:
             from ctypes import windll
+
             windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
         except Exception:
             pass
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     application = QApplication(sys.argv)
-    application.setApplicationName('Neptune')
-    application.setStyle('Fusion')
+    application.setApplicationName("Neptune")
+    application.setStyle("Fusion")
     application.setFont(T.ui_font())
     setTheme(Theme.DARK)
     setThemeColor(T.ACCENT)
@@ -68,14 +71,15 @@ def main() -> int:
 
     # Shown for as long as Shell takes to build its pages, so the main window is only ever
     # shown fully formed (see Shell.ready).
-    splash_path = paths.asset('icons/splash.png')
+    splash_path = paths.asset("icons/splash.png")
     splash_pixmap = QPixmap(splash_path) if splash_path else QPixmap()
     if splash_pixmap.isNull():
         splash_pixmap = QPixmap(*T.WINDOW_DEFAULT)
         splash_pixmap.fill(QColor(T.BG))
     else:
         splash_pixmap = splash_pixmap.scaledToWidth(
-            SPLASH_WIDTH, Qt.TransformationMode.SmoothTransformation)
+            SPLASH_WIDTH, Qt.TransformationMode.SmoothTransformation
+        )
 
     splash = QLabel()
     splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.WindowStaysOnTopHint)
@@ -98,5 +102,5 @@ def main() -> int:
     return application.exec()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,4 +1,5 @@
 """A pill switch, backed by Fluent's SwitchButton."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
@@ -6,13 +7,12 @@ from qfluentwidgets import SwitchButton
 
 
 class Toggle(SwitchButton):
-
     toggled_value = Signal(bool)
 
     def __init__(self, checked: bool = False, parent=None):
         super().__init__(parent)
-        self.setOnText('')
-        self.setOffText('')
+        self.setOnText("")
+        self.setOffText("")
         self.setChecked(checked)
         self.checkedChanged.connect(self.toggled_value.emit)
 

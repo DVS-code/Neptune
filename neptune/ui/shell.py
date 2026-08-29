@@ -1,4 +1,5 @@
 """The application window: sidebar navigation and page host."""
+
 from __future__ import annotations
 
 import sys
@@ -27,9 +28,9 @@ from neptune.ui.widgets.overlaypanel import OverlayPanel
 from neptune.ui.widgets.wordmark import Wordmark
 
 REFRESH_MS = 90
-GROUP_ORDER = ('Vehicle', 'World', 'Tool')
+GROUP_ORDER = ("Vehicle", "World", "Tool")
 NAV_ICON_WIDTH = 24
-EXCLUDED_FROM_NAV = {'presets', 'settings'}
+EXCLUDED_FROM_NAV = {"presets", "settings"}
 ATTACH_ICON_SIZE = 22
 TOPBAR_HEIGHT = 56
 
@@ -80,8 +81,8 @@ class Shell(QWidget):
         self._last_attached_state: bool | None = None
         self.update_available.connect(self._offer_update)
 
-        self.setObjectName('Root')
-        self.setWindowTitle('Neptune')
+        self.setObjectName("Root")
+        self.setWindowTitle("Neptune")
         self.setMinimumSize(*T.WINDOW_MIN)
         self.resize(*T.WINDOW_DEFAULT)
         self._apply_icon()
@@ -145,7 +146,7 @@ class Shell(QWidget):
 
         self._timer.start()
 
-        if self.settings.get('auto_attach'):
+        if self.settings.get("auto_attach"):
             QTimer.singleShot(250, self._auto_attach)
 
         self.ready.emit()
@@ -158,13 +159,13 @@ class Shell(QWidget):
         return page
 
     def _apply_icon(self) -> None:
-        icon_path = paths.asset('icons/neptune.ico')
+        icon_path = paths.asset("icons/neptune.ico")
         if icon_path:
             self.setWindowIcon(QIcon(icon_path))
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
-        sidebar.setObjectName('Sidebar')
+        sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(T.SIDEBAR_WIDTH)
 
         layout = QVBoxLayout(sidebar)
@@ -187,11 +188,11 @@ class Shell(QWidget):
         self.status_dot = StatusDot()
         status_row.addWidget(self.status_dot)
 
-        self.status_text = QLabel('Not attached')
-        self.status_text.setObjectName('StatusText')
+        self.status_text = QLabel("Not attached")
+        self.status_text.setObjectName("StatusText")
         status_row.addWidget(self.status_text, 1)
 
-        self.attach_icon_button = IconButton('dettached.png', 'Attach to game')
+        self.attach_icon_button = IconButton("dettached.png", "Attach to game")
         self.attach_icon_button.setFixedSize(ATTACH_ICON_SIZE, ATTACH_ICON_SIZE)
         self.attach_icon_button.setIconSize(QSize(14, 14))
         self.attach_icon_button.clicked.connect(self._toggle_attach)
@@ -200,14 +201,14 @@ class Shell(QWidget):
         layout.addLayout(status_row)
         layout.addSpacing(10)
 
-        self.restore_button = Button('Restore everything')
+        self.restore_button = Button("Restore everything")
         self.restore_button.clicked.connect(self._restore_all)
         layout.addWidget(self.restore_button)
         return sidebar
 
     def _build_topbar(self) -> QWidget:
         bar = QWidget()
-        bar.setObjectName('TopBar')
+        bar.setObjectName("TopBar")
         bar.setFixedHeight(TOPBAR_HEIGHT)
 
         layout = QHBoxLayout(bar)
@@ -218,21 +219,20 @@ class Shell(QWidget):
         layout.addWidget(Wordmark())
         layout.addStretch(1)
 
-        self.profile_button = IconButton('profile.png', 'Presets')
-        self.profile_button.clicked.connect(lambda: self._open_overlay('presets'))
+        self.profile_button = IconButton("profile.png", "Presets")
+        self.profile_button.clicked.connect(lambda: self._open_overlay("presets"))
         layout.addWidget(self.profile_button)
 
-        self.settings_button = IconButton('settings.png', 'Settings')
-        self.settings_button.clicked.connect(lambda: self._open_overlay('settings'))
+        self.settings_button = IconButton("settings.png", "Settings")
+        self.settings_button.clicked.connect(lambda: self._open_overlay("settings"))
         layout.addWidget(self.settings_button)
 
         return bar
 
     def _add_nav_item(self, module) -> None:
-        """One sidebar row: a tinted PNG icon in a fixed column, then the title.
-        """
+        """One sidebar row: a tinted PNG icon in a fixed column, then the title."""
         button = QPushButton()
-        button.setObjectName('NavItem')
+        button.setObjectName("NavItem")
         button.setCheckable(True)
         button.setCursor(Qt.PointingHandCursor)
 
@@ -241,13 +241,13 @@ class Shell(QWidget):
         row.setSpacing(12)
 
         mark = QLabel()
-        mark.setObjectName('NavIcon')
+        mark.setObjectName("NavIcon")
         mark.setFixedWidth(NAV_ICON_WIDTH)
         mark.setAlignment(Qt.AlignCenter)
         row.addWidget(mark)
 
         label = QLabel(module.title.upper())
-        label.setObjectName('NavLabel')
+        label.setObjectName("NavLabel")
         row.addWidget(label)
         row.addStretch(1)
 
@@ -262,20 +262,20 @@ class Shell(QWidget):
 
     @staticmethod
     def _nav_icon_variants(icon_file: str) -> tuple[QPixmap | None, QPixmap | None]:
-        """Read, tint and scale one nav icon once, as (selected, unselected).
-        """
+        """Read, tint and scale one nav icon once, as (selected, unselected)."""
         source = load_icon(icon_file) if icon_file else None
         if source is None:
             return (None, None)
         selected, unselected = (
             tinted(source, colour).scaled(
-                T.SIZE_ICON, T.SIZE_ICON, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            for colour in (T.TEXT_ON_ACCENT, T.TEXT))
+                T.SIZE_ICON, T.SIZE_ICON, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            for colour in (T.TEXT_ON_ACCENT, T.TEXT)
+        )
         return (selected, unselected)
 
     def _paint_nav(self, name: str, selected: bool) -> None:
-        """Colour one nav row's icon and title for its state.
-        """
+        """Colour one nav row's icon and title for its state."""
         parts = self._nav_parts.get(name)
         if parts is None:
             return
@@ -285,12 +285,12 @@ class Shell(QWidget):
         if pixmap is not None:
             mark.setPixmap(pixmap)
         colour = T.TEXT_ON_ACCENT if selected else T.TEXT
-        label.setStyleSheet(f'color: {colour}; background: transparent;')
+        label.setStyleSheet(f"color: {colour}; background: transparent;")
 
     def _paint_attach_icon(self, attached: bool) -> None:
-        icon_name = 'attached.png' if attached else 'dettached.png'
+        icon_name = "attached.png" if attached else "dettached.png"
         self.attach_icon_button.set_icon(icon_name)
-        self.attach_icon_button.setToolTip('Detach' if attached else 'Attach to game')
+        self.attach_icon_button.setToolTip("Detach" if attached else "Attach to game")
 
     def _open_overlay(self, name: str) -> None:
         page = self._overlay_pages.get(name)
@@ -325,6 +325,7 @@ class Shell(QWidget):
     def _auto_attach(self) -> None:
         from neptune.memory import offsets as O
         from neptune.memory.process import game_is_running
+
         if game_is_running(O.GAME_EXE):
             self._toggle_attach()
 
@@ -383,7 +384,7 @@ class Shell(QWidget):
                 continue
 
     def _enable_dark_titlebar(self) -> None:
-        if sys.platform != 'win32':
+        if sys.platform != "win32":
             return
         try:
             handle = int(self.winId())
@@ -391,28 +392,27 @@ class Shell(QWidget):
             for attribute in (20, 19):
                 try:
                     windll.dwmapi.DwmSetWindowAttribute(
-                        handle, attribute, byref(value), sizeof(value))
+                        handle, attribute, byref(value), sizeof(value)
+                    )
                 except Exception:
                     continue
-            colour = T.BG.lstrip('#')
+            colour = T.BG.lstrip("#")
             packed = c_int(int(colour[4:6] + colour[2:4] + colour[0:2], 16))
             windll.dwmapi.DwmSetWindowAttribute(handle, 35, byref(packed), sizeof(packed))
         except Exception:
             pass
 
-
     def _start_update_check(self) -> None:
         """Ask GitHub for a newer release, quietly, a moment after the window opens."""
-        if not self.settings.get('check_for_updates', True):
+        if not self.settings.get("check_for_updates", True):
             return
         from neptune.core import updater
 
         def landed(status, info):
 
-
             if status != updater.UPDATE_AVAILABLE or info is None:
                 return
-            if info.version == self.settings.get('skip_update_version'):
+            if info.version == self.settings.get("skip_update_version"):
                 return
             # `landed` runs on the update-check's worker thread (see check_async's
             # docstring). QTimer.singleShot() from there never fires: it has no Qt event
@@ -427,60 +427,63 @@ class Shell(QWidget):
         from neptune import __version__
         from neptune.core import updater
 
-        notes = (info.notes or '').strip()
+        notes = (info.notes or "").strip()
         if len(notes) > 700:
-            notes = notes[:700].rstrip() + '…'
+            notes = notes[:700].rstrip() + "…"
 
         box = QMessageBox(self)
-        box.setWindowTitle('Update available')
+        box.setWindowTitle("Update available")
         box.setIcon(QMessageBox.Information)
-        box.setText(f'Neptune {info.version} is available.')
+        box.setText(f"Neptune {info.version} is available.")
         box.setInformativeText(
-            f'You are running {__version__}.\n\n'
-            + (notes if notes else 'Would you like to update now?'))
-        install = box.addButton('Update now', QMessageBox.AcceptRole)
-        box.addButton('Not now', QMessageBox.RejectRole)
-        skip = box.addButton('Skip this version', QMessageBox.DestructiveRole)
+            f"You are running {__version__}.\n\n"
+            + (notes if notes else "Would you like to update now?")
+        )
+        install = box.addButton("Update now", QMessageBox.AcceptRole)
+        box.addButton("Not now", QMessageBox.RejectRole)
+        skip = box.addButton("Skip this version", QMessageBox.DestructiveRole)
         box.exec()
 
         clicked = box.clickedButton()
         if clicked is skip:
-
-            self.settings.set('skip_update_version', info.version)
+            self.settings.set("skip_update_version", info.version)
             return
         if clicked is not install:
             return
 
         if not updater.frozen():
-
             QMessageBox.information(
-                self, 'Update',
-                'Neptune is running from source, so it cannot replace itself.\n'
-                'The releases page has been opened in your browser.')
+                self,
+                "Update",
+                "Neptune is running from source, so it cannot replace itself.\n"
+                "The releases page has been opened in your browser.",
+            )
             updater.open_releases_page()
             return
 
         if updater.download_and_apply(info):
             QMessageBox.information(
-                self, 'Update',
-                'Neptune will close and reopen on the new version.')
+                self, "Update", "Neptune will close and reopen on the new version."
+            )
             self.close()
         else:
             QMessageBox.warning(
-                self, 'Update',
-                'The update could not be installed automatically.\n'
-                'The releases page has been opened so you can download it.')
+                self,
+                "Update",
+                "The update could not be installed automatically.\n"
+                "The releases page has been opened so you can download it.",
+            )
             updater.open_releases_page()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if hasattr(self, '_overlay'):
+        if hasattr(self, "_overlay"):
             self._overlay.setGeometry(self.rect())
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.repaint()
-        if getattr(self, '_faded', False):
+        if getattr(self, "_faded", False):
             return
         self._faded = True
         QTimer.singleShot(0, self._enable_dark_titlebar)
@@ -490,13 +493,13 @@ class Shell(QWidget):
     def closeEvent(self, event) -> None:
         self._timer.stop()
         try:
-            if self.settings.get('restore_on_exit'):
+            if self.settings.get("restore_on_exit"):
                 self.runtime.restore_all()
             self.runtime.detach()
         except Exception:
             pass
         try:
-            self.registry.dispatch('shutdown')
+            self.registry.dispatch("shutdown")
         except Exception:
             pass
         event.accept()
