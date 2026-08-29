@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+dist2/
+.venv/
+venv/
+env/
+data/
+*.spec.bak
+.vscode/
+.idea/
+*.log
+
+# Build output and packaged releases
+release/
+
+# Internal development notes.
+# These are PUBLISHED to the private development repo (Neptune-developement) so a
+# collaborator has the reverse-engineering context, and must stay OUT of the public
+# release repo. Keep that split in mind before changing this file.
+maybach audio/
