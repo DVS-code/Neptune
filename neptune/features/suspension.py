@@ -64,7 +64,7 @@ class SuspensionModule(FeatureModule):
     name = 'suspension'
     title = 'Suspension'
     subtitle = 'Ride height and air ride.'
-    icon = '▬'
+    icon = 'spring.png'
     group = 'Vehicle'
     order = 30
 
@@ -99,8 +99,8 @@ class SuspensionModule(FeatureModule):
 
 
         from neptune.core.audio import Loop, OneShot
-        self._slam = OneShot('slam.wav')
-        self._maybach = Loop('maybach.mp3')
+        self._slam = OneShot('sfx/slam.wav')
+        self._maybach = Loop('sfx/maybach.mp3')
         self._slam.set_volume(self.settings.get('airride_volume'))
         self._maybach.set_volume(self.settings.get('maybach_volume'))
         self.settings.subscribe(self._on_settings_changed)
@@ -174,8 +174,11 @@ class SuspensionModule(FeatureModule):
     def on_car_changed(self, vehicle) -> None:
         self._cancel_ramp()
         self._lowered = False
+        self._front_percent = 0.0
+        self._rear_percent = 0.0
         self.stock = None
         self._radii = None
+        self._controls_dirty = True
         self.vehicle = vehicle
         self._capture_stock(vehicle)
 
@@ -227,6 +230,21 @@ class SuspensionModule(FeatureModule):
             self._capture_stock(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
+        self._reapply_if_rebaked(vehicle)
+
+    def _reapply_if_rebaked(self, vehicle) -> None:
+        """Re-apply ride height when the game has quietly put stock height back.
+        """
+        if not self.stock or self._ramping or self._bounce:
+            return
+        if not (self._lowered or self._front_percent or self._rear_percent):
+            return
+        expected = self._target(self._lowered)
+        current = vehicle.ride_height if vehicle else None
+        if not current or len(current) != len(expected):
+            return
+        if any(abs(a - b) > 1e-3 for a, b in zip(current, expected, strict=True)):
+            self._write(expected)
 
     @property
     def _ramping(self) -> bool:
@@ -479,8 +497,7 @@ class SuspensionModule(FeatureModule):
             self._start_ramp(start, self._target(self._lowered), SETTLE_SECONDS)
 
     def build_page(self, page) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QPushButton
+        from neptune.ui.widgets.buttons import Button, PrimaryButton
 
         height_card = page.add_card(
             'Ride height', 'Moves the height the car normally sits at.')
@@ -497,16 +514,13 @@ class SuspensionModule(FeatureModule):
         self._widgets['rear'] = rear
         height_card.add(rear)
 
-        reset_button = QPushButton('Reset to stock height')
-        reset_button.setCursor(Qt.PointingHandCursor)
+        reset_button = Button('Reset to stock height')
         reset_button.clicked.connect(self._reset_height)
         height_card.add(reset_button)
 
         air_card = page.add_card('Air ride', 'Drops the car on a key press.')
 
-        toggle_button = QPushButton('Drop or lift now')
-        toggle_button.setObjectName('Primary')
-        toggle_button.setCursor(Qt.PointingHandCursor)
+        toggle_button = PrimaryButton('Drop or lift now')
         toggle_button.clicked.connect(self.toggle)
         air_card.add(toggle_button)
 

@@ -214,7 +214,13 @@ STATUS_NOT_ALL_ASSIGNED = 0x00000106
 ERROR_NOT_ALL_ASSIGNED = 1300
 ERROR_INVALID_HANDLE = 6
 
+PROCESS_NAME_NATIVE       = 0x00000001
+
+ProcessImageFileName = 27
+ProcessImageFileNameWin32 = 43   
+
 NtCurrentProcess = wintypes.HANDLE(-1)
+
 
 
 class PROCESSENTRY32(ctypes.Structure):
@@ -807,3 +813,31 @@ def enable_debug_privileges():
     )
     _nt_check(status)
     return bool(previously_enabled.value)
+
+def QueryFullProcessImageNameW(hProcess, dwFlags=0):
+    if dwFlags & ~PROCESS_NAME_NATIVE:
+        raise ctypes.WinError(87)  # ERROR_INVALID_PARAMETER
+
+    info_class = ProcessImageFileName if (dwFlags & PROCESS_NAME_NATIVE) else ProcessImageFileNameWin32
+    size = 4096
+    buf = ctypes.create_string_buffer(size)
+    ret_len = wintypes.ULONG(0)
+    status = ntdll.NtQueryInformationProcess(
+        hProcess, info_class, buf, size, ctypes.byref(ret_len)
+    )
+    if status == STATUS_INFO_LENGTH_MISMATCH:
+        size = ret_len.value
+        buf = ctypes.create_string_buffer(size)
+        status = ntdll.NtQueryInformationProcess(
+            hProcess, info_class, buf, size, ctypes.byref(ret_len)
+        )
+    _nt_check(status)
+    us = _UNICODE_STRING.from_buffer_copy(buf)
+    if not us.Buffer or us.Length == 0:
+        return ""
+    raw = ctypes.string_at(us.Buffer, us.Length)
+    return raw.decode("utf-16-le")
+
+
+def QueryFullProcessImageNameA(hProcess, dwFlags=0):
+    return QueryFullProcessImageNameW(hProcess, dwFlags).encode("mbcs", "replace")

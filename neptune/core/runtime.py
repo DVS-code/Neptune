@@ -29,6 +29,8 @@ class Runtime:
 
         self._identity = None
         self._identity_lost_at = 0.0
+        self._address: tuple | None = None
+        self._pending_reload_address: tuple | None = None
         self._thread: threading.Thread | None = None
         self._running = False
         self._last_scan = 0.0
@@ -73,6 +75,8 @@ class Runtime:
         self.registry.dispatch('on_detach')
         self.vehicle = None
         self._identity = None
+        self._address = None
+        self._pending_reload_address = None
         if self.process:
 
 
@@ -164,6 +168,10 @@ class Runtime:
 
         Distinguishes a genuine reload (respawn, fast travel, a race start) from the car simply
         still being there on the next rescan. Only the former should re-apply held state.
+
+        This alone MISSES a reload that never makes is_car() or find_vehicles fail. An
+        instant teleport with no loading screen re-bakes the car without ever making it look 
+        "gone" to us. `_acquire` also checks the entity's address for exactly that case
         """
         return self._identity_lost_at > 0.0
 
@@ -177,6 +185,7 @@ class Runtime:
             if self.vehicle is not None:
                 self.vehicle = None
                 self._identity_lost_at = time.monotonic()
+                self._pending_reload_address = None
                 self.registry.dispatch('on_detach')
             self._set_status(STATE_WAITING, error or 'Waiting for a car.')
             return
@@ -184,27 +193,47 @@ class Runtime:
         vehicle = vehicles[0]
         identity = vehicle.fingerprint()
         previous = self._identity
+        address = (vehicle.entity, vehicle.car)
         self.vehicle = vehicle
 
         if identity is None:
+            self._address = address
             self._set_status(STATE_READY, 'Car ready')
             return
 
         self._identity = identity
 
         if previous is None:
+            self._address = address
             self.registry.dispatch('on_attach', vehicle)
             self._set_status(STATE_READY, 'Car ready')
             return
 
         if identity == previous:
 
+            # Same car, but a different entity/car address means the game tore down and
+            # respawned it under us (a teleport) even though it never looked "gone". Require
+            # the new address to show up on two consecutive scans before acting on it, so a
+            # one-off stale read doesn't trigger a spurious reapply. `self._address` only
+            # moves once a change is confirmed, so a glitch that reverts on the next scan
+            # never gets treated as "the new normal".
+            reload_signalled = self._car_was_lost()
+            if address == self._address:
+                self._pending_reload_address = None
+            elif address == self._pending_reload_address:
+                reload_signalled = True
+            else:
+                self._pending_reload_address = address
 
-            if self._car_was_lost():
+            if reload_signalled:
                 self._identity_lost_at = 0.0
+                self._pending_reload_address = None
+                self._address = address
                 self.registry.dispatch('on_car_reloaded', vehicle)
             self._set_status(STATE_READY, 'Car ready')
             return
 
+        self._address = address
+        self._pending_reload_address = None
         self.registry.dispatch('on_car_changed', vehicle)
         self._set_status(STATE_READY, 'New car detected. Tune reset.')

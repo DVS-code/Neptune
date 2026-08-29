@@ -1,12 +1,36 @@
 """Turn the game's internal car name into something a person would recognise.
-
-The record carries a `MediaName` like `ALF_Giulia_16`: a manufacturer code, the model,
-and a two-digit year. That is enough to label a car without asking the user to type
-anything, which is why every car-scoped feature can now name itself.
+https://github.com/mavanmanen/fh6-car-database (community-maintained, snapshotted
+2026-08-29. Not official at all.
 """
 from __future__ import annotations
 
+import json
 import re
+
+from neptune.core import paths
+
+_by_id: dict[str, str] | None = None
+
+
+def by_id(car_id: int | None) -> str | None:
+    """The car's real name, from the bundled ID lookup table. None if not listed."""
+    global _by_id
+    if car_id is None:
+        return None
+    if _by_id is None:
+        _by_id = _load_table()
+    return _by_id.get(str(car_id))
+
+
+def _load_table() -> dict[str, str]:
+    path = paths.asset('cars/list.json')
+    if not path:
+        return {}
+    try:
+        with open(path, encoding='utf-8') as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
 
 MAKES = {
     '343': '343 Industries', 'AZM': 'Autozam', 'CHR': 'Chrysler',
@@ -127,6 +151,6 @@ def pretty(media_name: str | None) -> str:
     return ' '.join(piece for piece in (make, model, year) if piece)
 
 
-def label(media_name: str | None, fallback: str = '') -> str:
-    """A display name, falling back to the given text when nothing can be derived."""
-    return pretty(media_name) or fallback
+def label(media_name: str | None, car_id: int | None = None, fallback: str = '') -> str:
+    """A display name: the real name by ID when known, else the heuristic guess."""
+    return by_id(car_id) or pretty(media_name) or fallback

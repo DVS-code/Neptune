@@ -264,6 +264,20 @@ class Vehicle:
         return self.wheel_write(O.Wheels.RIDE_HEIGHT, values)
 
     @property
+    def camber(self) -> list[float] | None:
+        """Per-wheel static camber, in degrees. Stored as a half-angle (sin, cos) pair.
+        """
+        values = []
+        for index in range(O.Wheels.COUNT):
+            base = O.Wheels.addr(self.car, index, 0)
+            pair = self.process.f32_array(base + O.Wheels.CAMBER_SIN, 2)
+            if len(pair) != 2:
+                return None
+            sin, cos = pair
+            values.append(2.0 * math.degrees(math.atan2(sin, cos)))
+        return values
+
+    @property
     def wheel_radius(self) -> list[float] | None:
         """Per-wheel radius in metres. Constant for a given car and tyre fitment."""
         return self.wheel_read(O.Wheels.RADIUS)

@@ -1,11 +1,18 @@
 """Boost Gauge: a floating dial that sits over the game."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QHBoxLayout
 
 from neptune.core.module import FeatureModule
-from neptune.ui.overlay import DEFAULT_POSITION, DEFAULT_SIZE, MAX_SIZE, MIN_SIZE, GaugeOverlay
+from neptune.ui.overlay import (
+    DEFAULT_POSITION,
+    DEFAULT_SIZE,
+    MAX_SIZE,
+    MIN_SIZE,
+    GaugeOverlay,
+    dimensions_for,
+)
+from neptune.ui.widgets.buttons import Button
 from neptune.ui.widgets.card import Banner, FieldRow, ToggleRow
 from neptune.ui.widgets.controls import Segmented
 from neptune.ui.widgets.gaugeface import ACCENT_ORDER, MODES, GaugeFace
@@ -30,7 +37,7 @@ class BoostGaugeModule(FeatureModule):
     name = 'boostgauge'
     title = 'Boost Gauge'
     subtitle = 'A floating boost gauge on top of the game.'
-    icon = '◒'
+    icon = 'boost.png'
     group = 'Vehicle'
     order = 40
     always_refresh = True
@@ -141,6 +148,7 @@ class BoostGaugeModule(FeatureModule):
         if preview is not None:
             self._apply_style(preview)
             preview.set_value(PREVIEW_VALUE, gear=3)
+            preview.setFixedSize(*dimensions_for(self._mode, PREVIEW_SIZE))
         if self._overlay is not None:
             self._apply_style(self._overlay.face)
 
@@ -184,7 +192,7 @@ class BoostGaugeModule(FeatureModule):
         preview_row = QHBoxLayout()
         preview_row.addStretch(1)
         preview = GaugeFace()
-        preview.setFixedSize(PREVIEW_SIZE, PREVIEW_SIZE)
+        preview.setFixedSize(*dimensions_for(self._mode, PREVIEW_SIZE))
         preview.set_value(PREVIEW_VALUE, gear=3)
         self._widgets['preview'] = preview
         preview_row.addWidget(preview)
@@ -228,8 +236,7 @@ class BoostGaugeModule(FeatureModule):
         self._widgets['locked'] = locked
         place_card.add(locked)
 
-        reset = QPushButton('Move back to the corner')
-        reset.setCursor(Qt.PointingHandCursor)
+        reset = Button('Move back to the corner')
         reset.clicked.connect(lambda: self._jump_to(*DEFAULT_POSITION))
         place_card.add(reset)
 

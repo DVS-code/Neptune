@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 GAME_EXE = 'forzahorizon6.exe'
-GAME_BUILD = '420.696'
+GAME_BUILD = '430.771'
 
 RAD_TO_RPM = 9.549296
 
@@ -124,6 +124,9 @@ class Wheels:
     RADIUS = 0x0234
     TRAVEL = 0x0018
     LOAD = 0x0050
+
+    CAMBER_SIN = 0x0120
+    CAMBER_COS = 0x0124
 
     @classmethod
     def addr(cls, car: int, wheel: int, field: int) -> int:

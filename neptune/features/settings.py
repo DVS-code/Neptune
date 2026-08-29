@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QLabel, QPushButton
+from PySide6.QtWidgets import QLabel
 
 from neptune import __version__
 from neptune.core import paths
 from neptune.core.module import FeatureModule
 from neptune.core.settings import HEIGHT_UNITS, PRESSURE_UNITS, SPEED_UNITS
 from neptune.memory import offsets as O
+from neptune.ui.widgets.buttons import Button
 from neptune.ui.widgets.card import FieldRow, ToggleRow
 from neptune.ui.widgets.controls import Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
@@ -108,8 +109,7 @@ class SettingsModule(FeatureModule):
         updates.toggle.toggled_value.connect(self._set_check_for_updates)
         startup_card.add(updates)
 
-        check_button = QPushButton('Check for updates now')
-        check_button.setCursor(Qt.PointingHandCursor)
+        check_button = Button('Check for updates now')
         check_button.clicked.connect(self._check_now)
         startup_card.add(check_button)
 
@@ -121,8 +121,7 @@ class SettingsModule(FeatureModule):
         self._widgets['devices'].setWordWrap(True)
         input_card.add(self._widgets['devices'])
 
-        refresh_devices = QPushButton('Rescan for wheels')
-        refresh_devices.setCursor(Qt.PointingHandCursor)
+        refresh_devices = Button('Rescan for wheels')
         refresh_devices.clicked.connect(self._rescan_devices)
         input_card.add(refresh_devices)
 
@@ -140,16 +139,14 @@ class SettingsModule(FeatureModule):
         location.setTextInteractionFlags(Qt.TextSelectableByMouse)
         data_card.add(location)
 
-        open_button = QPushButton('Open this folder')
-        open_button.setCursor(Qt.PointingHandCursor)
+        open_button = Button('Open this folder')
         open_button.clicked.connect(self._open_data_folder)
         data_card.add(open_button)
 
         feedback_card = page.add_card(
             'Report bugs / feedback',
             'Found something broken, or want a feature? Open an issue on GitHub.')
-        report_button = QPushButton('Report bugs / feedback')
-        report_button.setCursor(Qt.PointingHandCursor)
+        report_button = Button('Report bugs / feedback')
         report_button.clicked.connect(self._open_issues)
         feedback_card.add(report_button)
 

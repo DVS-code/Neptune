@@ -5,7 +5,7 @@ datas = []
 if os.path.isdir('assets'):
     datas.append(('assets', 'assets'))
 
-icon = 'assets/neptune.ico' if os.path.isfile('assets/neptune.ico') else None
+icon = 'assets/icons/neptune.ico' if os.path.isfile('assets/icons/neptune.ico') else None
 
 analysis = Analysis(
     ['neptune/app.py'],

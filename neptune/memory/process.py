@@ -104,6 +104,15 @@ class Process:
             return False
         return code == STILL_ACTIVE
 
+    @property
+    def executable_path(self) -> str | None:
+        if not self.handle:
+            return None
+        try:
+            return k32.QueryFullProcessImageNameW(ctypes.c_void_p(self.handle))
+        except OSError:
+            return None
+
     def read(self, address: int, size: int) -> bytes | None:
         if not address or size <= 0:
             return None

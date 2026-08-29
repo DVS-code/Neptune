@@ -81,7 +81,7 @@ class HelpMark(QWidget):
         painter.drawEllipse(1, 1, SIZE - 3, SIZE - 3)
 
         font = QFont(self.font())
-        font.setPixelSize(SIZE - 5)
+        font.setPixelSize(SIZE - 7)
         font.setWeight(QFont.Bold)
         painter.setFont(font)
         painter.setPen(QColor(glyph))

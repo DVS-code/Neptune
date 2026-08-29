@@ -55,7 +55,7 @@ class TurboModule(FeatureModule):
     name = 'turbo'
     title = 'Turbo'
     subtitle = 'Boost ceiling, power delivery and spool.'
-    icon = '●'
+    icon = 'turbo.png'
     group = 'Vehicle'
     order = 20
 
@@ -696,10 +696,10 @@ class TurboModule(FeatureModule):
         map_card.add(boost_map)
 
 
-        from PySide6.QtCore import Qt as _Qt
         from PySide6.QtWidgets import QHBoxLayout as _HBox
-        from PySide6.QtWidgets import QPushButton
         from PySide6.QtWidgets import QWidget as _Widget
+
+        from neptune.ui.widgets.buttons import Button as _Button
         tools = _Widget()
         row = _HBox(tools)
         row.setContentsMargins(0, 0, 0, 0)
@@ -713,8 +713,7 @@ class TurboModule(FeatureModule):
             ('Flatten', self._flatten_map, 'Put the whole table back to 1.00x'),
         )
         for label, handler, tip in operations:
-            button = QPushButton(label)
-            button.setCursor(_Qt.PointingHandCursor)
+            button = _Button(label)
             button.setToolTip(tip)
             button.clicked.connect(handler)
             row.addWidget(button)

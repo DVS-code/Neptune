@@ -3,17 +3,26 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from qfluentwidgets import (
+    InfoBar,
+    InfoBarIcon,
+    InfoBarPosition,
+    SimpleCardWidget,
+    StrongBodyLabel,
+)
 
 from neptune.ui import theme as T
 from neptune.ui.widgets.helpmark import HelpMark
 from neptune.ui.widgets.toggle import Toggle
 
 
-class Card(QFrame):
+class Card(SimpleCardWidget):
+    """A flat container. `SimpleCardWidget`, not `CardWidget`: the latter is Fluent's
+    *clickable* card and brings a hover-brighten animation with it, which these cards —
+    plain grouping panels, never navigation targets — must not have."""
 
     def __init__(self, title: str = '', caption: str = '', parent=None):
         super().__init__(parent)
-        self.setObjectName('Card')
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         outer = QVBoxLayout(self)
@@ -21,14 +30,11 @@ class Card(QFrame):
         outer.setSpacing(0)
 
         if title:
-
-
             head = QHBoxLayout()
             head.setContentsMargins(0, 0, 0, 0)
             head.setSpacing(7)
 
-            title_label = QLabel(title)
-            title_label.setObjectName('CardTitle')
+            title_label = StrongBodyLabel(title)
             head.addWidget(title_label)
 
             self._help = HelpMark(caption)
@@ -52,8 +58,9 @@ class Card(QFrame):
 
     def add_divider(self) -> None:
         line = QFrame()
-        line.setObjectName('CardDivider')
         line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet(
+            f'background: {T.BORDER}; max-height: 1px; min-height: 1px; border: none;')
         self.body.addWidget(line)
 
 
@@ -171,37 +178,60 @@ class StatStrip(QWidget):
             stat.set(value, T.TEXT_FAINT)
 
 
-class Banner(QFrame):
+class Banner(QWidget):
 
-    COLOURS = {'info': T.INFO, 'warn': T.WARN, 'error': T.ERR, 'ok': T.OK}
+    ICONS = {
+        'info': InfoBarIcon.INFORMATION,
+        'warn': InfoBarIcon.WARNING,
+        'error': InfoBarIcon.ERROR,
+        'ok': InfoBarIcon.SUCCESS,
+    }
 
     def __init__(self, text: str = '', kind: str = 'info', parent=None):
         super().__init__(parent)
-        self.setObjectName('Banner')
         self._kind = kind
+        self._text = text
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._bar = None
+        self._rebuild()
+        self.setVisible(bool(text))
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(13, 11, 13, 11)
-        row.setSpacing(11)
+    def _rebuild(self) -> None:
+        if self._bar is not None:
+            self._layout.removeWidget(self._bar)
+            self._bar.deleteLater()
+        self._bar = InfoBar(
+            icon=self.ICONS.get(self._kind, InfoBarIcon.INFORMATION),
+            title='', content=self._text, orient=Qt.Horizontal,
+            isClosable=False, duration=-1,
+            position=InfoBarPosition.NONE, parent=self)
+        self._layout.addWidget(self._bar)
+        self._bar.show()
 
-        self._text = QLabel(text)
-        self._text.setObjectName('BannerText')
-        self._text.setWordWrap(True)
-        row.addWidget(self._text, 1)
+    def _retext(self) -> None:
+        """Repoint the existing InfoBar at `self._text`, no reconstruction.
 
-        self._apply(kind)
-
-    def _apply(self, kind: str) -> None:
-        colour = self.COLOURS.get(kind, T.INFO)
-        self.setStyleSheet(
-            f'QFrame#Banner {{ background: {T.SURFACE_SUNKEN};'
-            f' border: 1px solid {T.BORDER};'
-            f' border-left: 3px solid {colour};'
-            f' border-radius: {T.CONTROL_RADIUS}px; }}')
+        Goes through qfluentwidgets' undocumented internals (no public API exists for
+        this). If a library update renames or removes any of them, fall back to a full
+        rebuild instead of raising.
+        """
+        try:
+            self._bar.content = self._text
+            self._bar.contentLabel.setVisible(bool(self._text))
+            self._bar._adjustText()
+        except AttributeError:
+            self._rebuild()
 
     def set(self, text: str, kind: str | None = None) -> None:
-        self._text.setText(text)
-        if kind and kind != self._kind:
+        """Update the banner, rebuilding only when it genuinely has to.
+        """
+        kind = kind or self._kind
+        if kind != self._kind:
             self._kind = kind
-            self._apply(kind)
+            self._text = text
+            self._rebuild()
+        elif text != self._text:
+            self._text = text
+            self._retext()
         self.setVisible(bool(text))

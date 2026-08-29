@@ -1,20 +1,14 @@
 """Tunes: saved engine and turbo setups for the car you are driving."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QListWidgetItem
+from qfluentwidgets import LineEdit, ListWidget
 
 from neptune.core import carnames
 from neptune.core import input as inp
 from neptune.core import maps as store
 from neptune.core.module import FeatureModule
+from neptune.ui.widgets.buttons import Button, DangerButton, PrimaryButton
 from neptune.ui.widgets.card import Banner, FieldRow
 from neptune.ui.widgets.controls import BindButton
 
@@ -29,7 +23,7 @@ class TunesModule(FeatureModule):
     name = 'tunes'
     title = 'Tunes'
     subtitle = 'Save engine and turbo setups per car and switch between them.'
-    icon = '▲'
+    icon = 'tunes.png'
     group = 'Vehicle'
     order = 50
 
@@ -215,14 +209,13 @@ class TunesModule(FeatureModule):
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
-        car_name = QLineEdit()
+        car_name = LineEdit()
         car_name.setPlaceholderText('Rename this car')
         car_name.returnPressed.connect(self._on_name_car)
         self._widgets['car_name'] = car_name
         name_row.addWidget(car_name, 1)
 
-        name_button = QPushButton('Save name')
-        name_button.setCursor(Qt.PointingHandCursor)
+        name_button = Button('Save name')
         name_button.clicked.connect(self._on_name_car)
         name_row.addWidget(name_button)
         car_card.add_layout(name_row)
@@ -235,21 +228,19 @@ class TunesModule(FeatureModule):
         save_row = QHBoxLayout()
         save_row.setSpacing(8)
 
-        tune_name = QLineEdit()
+        tune_name = LineEdit()
         tune_name.setPlaceholderText('Tune name, for example Street or Drag')
         tune_name.returnPressed.connect(self._on_save)
         self._widgets['tune_name'] = tune_name
         save_row.addWidget(tune_name, 1)
 
-        save_button = QPushButton('Save tune')
-        save_button.setObjectName('Primary')
-        save_button.setCursor(Qt.PointingHandCursor)
+        save_button = PrimaryButton('Save tune')
         save_button.clicked.connect(self._on_save)
         save_row.addWidget(save_button)
         save_card.add_layout(save_row)
 
         list_card = page.add_card('Saved tunes')
-        listing = QListWidget()
+        listing = ListWidget()
         listing.setMinimumHeight(180)
         listing.itemDoubleClicked.connect(lambda _item: self._on_apply())
         self._widgets['list'] = listing
@@ -258,20 +249,15 @@ class TunesModule(FeatureModule):
         actions = QHBoxLayout()
         actions.setSpacing(8)
 
-        apply_button = QPushButton('Apply')
-        apply_button.setObjectName('Primary')
-        apply_button.setCursor(Qt.PointingHandCursor)
+        apply_button = PrimaryButton('Apply')
         apply_button.clicked.connect(self._on_apply)
         actions.addWidget(apply_button)
 
-        overwrite_button = QPushButton('Overwrite')
-        overwrite_button.setCursor(Qt.PointingHandCursor)
+        overwrite_button = Button('Overwrite')
         overwrite_button.clicked.connect(self._on_overwrite)
         actions.addWidget(overwrite_button)
 
-        delete_button = QPushButton('Delete')
-        delete_button.setObjectName('Danger')
-        delete_button.setCursor(Qt.PointingHandCursor)
+        delete_button = DangerButton('Delete')
         delete_button.clicked.connect(self._on_delete)
         actions.addWidget(delete_button)
         actions.addStretch(1)

@@ -26,6 +26,15 @@ SCALE_LADDER = (15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0,
                 250.0, 400.0, 600.0, 1000.0)
 
 
+def dimensions_for(mode: str, size: int) -> tuple[int, int]:
+    """Get the width and height of the gauge for a given mode and height."""
+    if mode in WIDE_MODES:
+        return size, max(60, int(size * WIDE_RATIO))
+    if mode == 'Digital':
+        return size, int(size * DIGITAL_RATIO)
+    return size, size
+
+
 def scale_for(value: float, floor: float) -> float:
     """The smallest dial scale that comfortably contains `value`."""
     wanted = max(float(value) * 1.15, float(floor))
@@ -77,12 +86,7 @@ class GaugeOverlay(QWidget):
         self.resize(*self._dimensions())
 
     def _dimensions(self) -> tuple[int, int]:
-        mode = self.face.mode
-        if mode in WIDE_MODES:
-            return self._size, max(60, int(self._size * WIDE_RATIO))
-        if mode == 'Digital':
-            return self._size, int(self._size * DIGITAL_RATIO)
-        return self._size, self._size
+        return dimensions_for(self.face.mode, self._size)
 
     def set_settings(self, settings) -> None:
         self._settings = settings

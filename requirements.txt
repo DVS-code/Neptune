@@ -1,1 +1,3 @@
 PySide6>=6.6
+PySide6-Fluent-Widgets>=1.11
+texture2ddecoder>=1.0

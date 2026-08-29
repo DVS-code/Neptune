@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import LineEdit
 
 from neptune.ui.widgets.helpmark import HelpMark
 from neptune.ui.widgets.slider import Slider
@@ -56,7 +57,8 @@ class SliderRow(QWidget):
         self._slider.moved.connect(self._on_slider)
         row.addWidget(self._slider, 1)
 
-        self._field = QLineEdit(self._format(self._value))
+        self._field = LineEdit()
+        self._field.setText(self._format(self._value))
         self._field.setObjectName('ValueEdit')
         self._field.setFixedWidth(FIELD_WIDTH)
         self._field.setAlignment(Qt.AlignRight | Qt.AlignVCenter)

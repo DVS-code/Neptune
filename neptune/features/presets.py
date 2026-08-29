@@ -1,11 +1,12 @@
 """Presets: save and reload whole setups."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QListWidget, QPushButton
+from PySide6.QtWidgets import QHBoxLayout
+from qfluentwidgets import LineEdit, ListWidget
 
 from neptune.core import presets as store
 from neptune.core.module import FeatureModule
+from neptune.ui.widgets.buttons import DangerButton, PrimaryButton
 from neptune.ui.widgets.card import Banner
 
 CAPTION = ('Presets cover suspension, the boost gauge and Dragy. '
@@ -32,21 +33,19 @@ class PresetsModule(FeatureModule):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        name = QLineEdit()
+        name = LineEdit()
         name.setPlaceholderText('Preset name')
         name.returnPressed.connect(self._save)
         self._widgets['name'] = name
         row.addWidget(name, 1)
 
-        save_button = QPushButton('Save preset')
-        save_button.setObjectName('Primary')
-        save_button.setCursor(Qt.PointingHandCursor)
+        save_button = PrimaryButton('Save preset')
         save_button.clicked.connect(self._save)
         row.addWidget(save_button)
         save_card.add_layout(row)
 
         list_card = page.add_card('Saved presets')
-        listing = QListWidget()
+        listing = ListWidget()
         listing.setMinimumHeight(200)
         listing.itemDoubleClicked.connect(lambda _item: self._load())
         self._widgets['list'] = listing
@@ -55,15 +54,11 @@ class PresetsModule(FeatureModule):
         actions = QHBoxLayout()
         actions.setSpacing(8)
 
-        load_button = QPushButton('Load')
-        load_button.setObjectName('Primary')
-        load_button.setCursor(Qt.PointingHandCursor)
+        load_button = PrimaryButton('Load')
         load_button.clicked.connect(self._load)
         actions.addWidget(load_button)
 
-        delete_button = QPushButton('Delete')
-        delete_button.setObjectName('Danger')
-        delete_button.setCursor(Qt.PointingHandCursor)
+        delete_button = DangerButton('Delete')
         delete_button.clicked.connect(self._delete)
         actions.addWidget(delete_button)
         actions.addStretch(1)

@@ -17,9 +17,6 @@ ACCENT_DEEP = '#7e22ce'
 ACCENT_MUTED = '#2a1d3d'
 ACCENT_GLOW = 'rgba(168, 85, 247, 0.16)'
 
-WORDMARK_GRADIENT = ('#e040d6', '#c084fc', '#8b5cf6', '#6366f1',
-                     '#8b5cf6', '#c084fc')
-
 TEXT = '#f2f3f5'
 TEXT_MUTED = '#9ba1ad'
 TEXT_FAINT = '#646b78'
@@ -36,41 +33,12 @@ CURVE_FILL_TOP = 'rgba(168, 85, 247, 0.22)'
 CURVE_FILL_BOTTOM = 'rgba(168, 85, 247, 0.02)'
 GRID = '#1c1f27'
 
-
-
-
-
-
-
-
-
-FONT_UI = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif'
 FONT_DISPLAY = '"Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI", sans-serif'
 FONT_SMALL = '"Segoe UI Variable Small", "Segoe UI", sans-serif'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 FONT_NUM = '"Segoe UI", Tahoma, sans-serif'
 NUM_WEIGHT = 650
 
-
-
-
-FONT_ICON = 'Segoe Fluent Icons'
 
 SIZE_DISPLAY = 22
 SIZE_TITLE = 15
@@ -86,8 +54,8 @@ CARD_GAP = 16
 CARD_RADIUS = 10
 CONTROL_RADIUS = 7
 
-WINDOW_MIN = (1060, 720)
-WINDOW_DEFAULT = (1180, 820)
+WINDOW_MIN = (985, 631)
+WINDOW_DEFAULT = (1074, 689)
 
 
 UI_FAMILIES = ('Segoe UI Variable Text', 'Segoe UI', 'Tahoma')
@@ -120,9 +88,8 @@ def ui_font():
 
 def stylesheet() -> str:
     return f"""
+
 * {{
-    font-family: {FONT_UI};
-    font-size: {SIZE_BODY}px;
     color: {TEXT};
     outline: none;
 }}
@@ -148,79 +115,29 @@ QWidget#Sidebar {{
     border-right: 1px solid {BORDER};
 }}
 
-QLabel#NavGroup {{
-    font-family: {FONT_SMALL};
-    font-size: {SIZE_CAPTION}px;
-    font-weight: 700;
-    letter-spacing: 1.4px;
-    color: {TEXT_FAINT};
-    padding: 0px 12px;
-}}
 
 QPushButton#NavItem {{
-    background: transparent;
+    background: {SURFACE};
     border: none;
     border-radius: {CONTROL_RADIUS}px;
     text-align: left;
     padding: 0px;
-    min-height: 34px;
+    min-height: 44px;
 }}
 QPushButton#NavItem:hover {{
-    background: {SURFACE};
+    background: {SURFACE_HOVER};
 }}
 QPushButton#NavItem:checked {{
-    background: {ACCENT_MUTED};
+    background: {ACCENT};
 }}
-
-/* ⚠️ The icon and label sit INSIDE the nav button, and their selected/hover colours are
-   set from code (`Shell._paint_nav`), not here. Qt applies a descendant rule such as
-   `QPushButton:checked QLabel` to every matching child regardless of the parent's actual
-   state — measured: an unchecked button's label still took the :checked colour — so every
-   row would have looked selected. Only the state-independent parts belong in the sheet. */
-/* Font family and size are set in code, so a machine without the icon font gets the
-   fallback shape in a text font rather than a box. */
 QLabel#NavIcon {{
     background: transparent;
 }}
 QLabel#NavLabel {{
     font-size: {SIZE_BODY}px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
     background: transparent;
-}}
-
-QLabel#PageTitle {{
-    font-family: {FONT_DISPLAY};
-    font-size: {SIZE_TITLE}px;
-    letter-spacing: -0.2px;
-    font-weight: 650;
-    color: {TEXT};
-}}
-QLabel#PageSubtitle {{
-    font-family: {FONT_SMALL};
-    font-size: {SIZE_LABEL}px;
-    color: {TEXT_FAINT};
-}}
-
-QFrame#Card {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: {CARD_RADIUS}px;
-}}
-QLabel#CardTitle {{
-    font-family: {FONT_DISPLAY};
-    font-size: {SIZE_HEADING}px;
-    font-weight: 650;
-    color: {TEXT};
-}}
-QLabel#CardCaption {{
-    font-family: {FONT_SMALL};
-    font-size: {SIZE_LABEL}px;
-    color: {TEXT_FAINT};
-}}
-QFrame#CardDivider {{
-    background: {BORDER};
-    max-height: 1px;
-    min-height: 1px;
-    border: none;
 }}
 
 QLabel#RowLabel {{
@@ -244,137 +161,10 @@ QLabel#RowValueMuted {{
     font-weight: {NUM_WEIGHT};
     color: {TEXT_FAINT};
 }}
-
-QPushButton {{
-    background: {BG_RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: {CONTROL_RADIUS}px;
-    padding: 8px 16px;
-    font-size: {SIZE_BODY}px;
-    font-weight: 550;
-    color: {TEXT};
-}}
-QPushButton:hover {{
-    background: {SURFACE_HOVER};
-    border-color: {BORDER_FOCUS};
-}}
-QPushButton:pressed {{
-    background: {SURFACE_SUNKEN};
-}}
-QPushButton:disabled {{
-    background: {SURFACE_SUNKEN};
-    border-color: {BORDER};
-    color: {TEXT_FAINT};
-}}
-
-QPushButton#Primary {{
-    background: {ACCENT};
-    border: 1px solid {ACCENT};
-    color: {TEXT_ON_ACCENT};
-    font-weight: 650;
-}}
-QPushButton#Primary:hover {{
-    background: {ACCENT_BRIGHT};
-    border-color: {ACCENT_BRIGHT};
-}}
-QPushButton#Primary:pressed {{
-    background: {ACCENT_DEEP};
-    border-color: {ACCENT_DEEP};
-}}
-QPushButton#Primary:disabled {{
-    background: {ACCENT_MUTED};
-    border-color: {ACCENT_MUTED};
-    color: {TEXT_FAINT};
-}}
-
-QPushButton#Danger:hover {{
-    border-color: {ERR};
-    color: {ERR};
-}}
-
-QPushButton#Ghost {{
-    background: transparent;
-    border: 1px solid transparent;
-    color: {TEXT_MUTED};
-    padding: 6px 10px;
-}}
-QPushButton#Ghost:hover {{
-    background: {SURFACE_HOVER};
-    color: {TEXT};
-}}
-
-QLineEdit {{
-    background: {SURFACE_SUNKEN};
-    border: 1px solid {BORDER};
-    border-radius: {CONTROL_RADIUS}px;
-    padding: 8px 11px;
-    selection-background-color: {ACCENT};
-    selection-color: {TEXT_ON_ACCENT};
-}}
-QLineEdit:focus {{
-    border-color: {ACCENT};
-}}
-QLineEdit:disabled {{
-    color: {TEXT_FAINT};
-}}
 QLineEdit#ValueEdit {{
     font-family: {FONT_NUM};
     font-weight: {NUM_WEIGHT};
     padding: 5px 8px;
-}}
-
-QComboBox {{
-    background: {BG_RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: {CONTROL_RADIUS}px;
-    padding: 7px 12px;
-    min-width: 130px;
-}}
-QComboBox:hover {{
-    border-color: {BORDER_FOCUS};
-}}
-QComboBox::drop-down {{
-    border: none;
-    width: 26px;
-}}
-QComboBox QAbstractItemView {{
-    background: {BG_RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: 8px;
-    padding: 5px;
-    selection-background-color: {ACCENT_MUTED};
-    selection-color: {TEXT};
-    outline: none;
-}}
-
-QListWidget {{
-    background: {SURFACE_SUNKEN};
-    border: 1px solid {BORDER};
-    border-radius: {CONTROL_RADIUS}px;
-    padding: 5px;
-    outline: none;
-}}
-QListWidget::item {{
-    padding: 9px 11px;
-    border-radius: 6px;
-    color: {TEXT_MUTED};
-}}
-QListWidget::item:hover {{
-    background: {SURFACE_HOVER};
-    color: {TEXT};
-}}
-QListWidget::item:selected {{
-    background: {ACCENT_MUTED};
-    color: {TEXT};
-}}
-
-QPlainTextEdit {{
-    background: {SURFACE_SUNKEN};
-    border: 1px solid {BORDER};
-    border-radius: {CONTROL_RADIUS}px;
-    padding: 10px;
-    font-size: {SIZE_LABEL}px;
-    color: {TEXT_MUTED};
 }}
 
 QScrollArea {{
@@ -421,23 +211,9 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
     border: none;
 }}
 
-QWidget#StatusBar {{
-    background: {SURFACE_SUNKEN};
-    border-top: 1px solid {BORDER};
-}}
 QLabel#StatusText {{
-    font-size: {SIZE_LABEL}px;
+    font-size: {SIZE_CAPTION}px;
     color: {TEXT_MUTED};
-}}
-QLabel#StatMetric {{
-    font-family: {FONT_NUM};
-    font-size: {SIZE_LABEL}px;
-    font-weight: {NUM_WEIGHT};
-    color: {TEXT_MUTED};
-}}
-QLabel#StatDivider {{
-    font-size: {SIZE_LABEL}px;
-    color: {BORDER_STRONG};
 }}
 
 QLabel#StatCaption {{
@@ -456,28 +232,5 @@ QLabel#StatValue {{
 QLabel#StatUnit {{
     font-size: {SIZE_LABEL}px;
     color: {TEXT_FAINT};
-}}
-
-QLabel#BannerText {{
-    font-size: {SIZE_LABEL}px;
-    color: {TEXT_MUTED};
-}}
-
-QCheckBox {{
-    spacing: 9px;
-}}
-QCheckBox::indicator {{
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
-    border: 1px solid {BORDER_STRONG};
-    background: {SURFACE_SUNKEN};
-}}
-QCheckBox::indicator:hover {{
-    border-color: {ACCENT};
-}}
-QCheckBox::indicator:checked {{
-    background: {ACCENT};
-    border-color: {ACCENT};
 }}
 """

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPushButton
+from PySide6.QtWidgets import QLabel
 
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
+from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
@@ -91,7 +91,7 @@ class DragyModule(FeatureModule):
     name = 'dragy'
     title = 'Dragy'
     subtitle = 'Times how long the car takes between two speeds.'
-    icon = '⏱'
+    icon = 'dragy.png'
     group = 'Vehicle'
     order = 35
 
@@ -478,15 +478,12 @@ class DragyModule(FeatureModule):
         self._widgets['target'] = target
         run_card.add(target)
 
-        arm_button = QPushButton('Arm')
-        arm_button.setObjectName('Primary')
-        arm_button.setCursor(Qt.PointingHandCursor)
+        arm_button = PrimaryButton('Arm')
         arm_button.clicked.connect(self.toggle_arm)
         self._widgets['arm'] = arm_button
         run_card.add(arm_button)
 
-        reset_button = QPushButton('Reset')
-        reset_button.setCursor(Qt.PointingHandCursor)
+        reset_button = Button('Reset')
         reset_button.clicked.connect(self.reset)
         run_card.add(reset_button)
 
@@ -513,8 +510,7 @@ class DragyModule(FeatureModule):
             history_card.add(row)
         self._widgets['history_rows'] = rows
 
-        clear_button = QPushButton('Clear runs')
-        clear_button.setCursor(Qt.PointingHandCursor)
+        clear_button = Button('Clear runs')
         clear_button.clicked.connect(self._clear_history)
         history_card.add(clear_button)
 
@@ -690,12 +686,6 @@ class DragyModule(FeatureModule):
         toggle = self._widgets.get('overlay')
         if toggle is not None:
             toggle.toggle.set_value(self._overlay_enabled)
-
-
-
-
-
-
 
         for key, value in (('mode', self._mode), ('distance', self._distance),
                            ('preset_unit', self._preset_unit),

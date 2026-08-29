@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QHBoxLayout
 
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
+from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import Banner, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import BindButton
 from neptune.ui.widgets.sliderrow import SliderRow
@@ -55,7 +55,7 @@ class EngineModule(FeatureModule):
     name = 'engine'
     title = 'Engine'
     subtitle = 'Torque delivery, rev limit and launch behaviour.'
-    icon = '◆'
+    icon = 'engine.png'
     group = 'Vehicle'
     order = 10
 
@@ -69,6 +69,7 @@ class EngineModule(FeatureModule):
 
         self._torque_multiplier = 1.0
         self._rev_limit: float | None = None
+        self._custom_curve: list[float] | None = None
         self._last_reapply = 0.0
         self._pending_edits: dict[int, float] = {}
 
@@ -133,15 +134,14 @@ class EngineModule(FeatureModule):
         self._launch_engaged = False
         self._torque_multiplier = 1.0
         self._rev_limit = None
+        self._custom_curve = None
         self._pending_edits.clear()
         self.on_attach(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
-        if self._rev_limit is not None:
-            self._apply_rev_limit()
-        elif self._torque_multiplier != 1.0:
-            self._apply_curve()
+        if self._curve_is_tuned():
+            self._reapply_curve_state()
 
     def on_detach(self) -> None:
         self.vehicle = None
@@ -156,6 +156,7 @@ class EngineModule(FeatureModule):
         self._launch_engaged = False
         self._torque_multiplier = 1.0
         self._rev_limit = None
+        self._custom_curve = None
         self._pending_edits.clear()
         if vehicle is None or not self.stock_curve:
             return
@@ -174,6 +175,7 @@ class EngineModule(FeatureModule):
             launch_arm.set_value(False)
         self._torque_multiplier = 1.0
         self._rev_limit = None
+        self._custom_curve = None
 
         torque = self._widgets.get('torque')
         if torque is not None:
@@ -190,17 +192,20 @@ class EngineModule(FeatureModule):
         if vehicle is None or not self.stock_curve:
             return
 
-        if self._rev_limit is not None and not self._engaged:
+        if self._curve_is_tuned() and not self._engaged:
             now = time.monotonic()
             if now - self._last_reapply >= REAPPLY_INTERVAL:
                 self._last_reapply = now
-                self._apply_rev_limit()
+                self._reapply_curve_state()
 
         if self._pending_edits and not self._engaged:
             pending = self._pending_edits
             self._pending_edits = {}
             for start, values in _contiguous_runs(pending):
                 vehicle.set_curve_from(start, values)
+            graph = self._widgets.get('graph')
+            if graph is not None and graph.live:
+                self._custom_curve = list(graph.live)
 
 
 
@@ -351,7 +356,7 @@ class EngineModule(FeatureModule):
 
         self._wall_tail_written = False
 
-    def _apply_rev_limit(self) -> None:
+    def _apply_rev_ceiling(self) -> None:
         vehicle = self.vehicle
         if vehicle is None:
             return
@@ -360,7 +365,31 @@ class EngineModule(FeatureModule):
                 vehicle.set_rev_ceiling(self.stock_ceiling)
         else:
             vehicle.set_rev_ceiling(self._rev_limit)
+
+    def _apply_rev_limit(self) -> None:
+        self._apply_rev_ceiling()
         self._apply_curve()
+
+    def _apply_custom_curve(self) -> None:
+        vehicle = self.vehicle
+        if vehicle is None or not self._custom_curve or self._engaged:
+            return
+        vehicle.set_curve_from(0, self._custom_curve[:-1])
+
+    def _curve_is_tuned(self) -> bool:
+        return (self._rev_limit is not None or self._torque_multiplier != 1.0
+                or self._custom_curve is not None)
+
+    def _reapply_curve_state(self) -> None:
+        """Re-apply whatever curve state is active.
+        (This is called on a timer while the car is held, to catch the game re-baking the curve
+        back to stock on a teleport or fast travel.)
+        """
+        if self._custom_curve is not None:
+            self._apply_custom_curve()
+        else:
+            self._apply_curve()
+        self._apply_rev_ceiling()
 
     def _sync_rev_slider(self) -> None:
         slider = self._widgets.get('rev')
@@ -371,11 +400,13 @@ class EngineModule(FeatureModule):
 
     def _on_torque(self, value: float) -> None:
         self._torque_multiplier = float(value)
+        self._custom_curve = None
         self._apply_curve()
 
     def _on_rev_limit(self, value: float) -> None:
         reference = self.stock_ceiling or self.stock_redline or 7000.0
         self._rev_limit = None if abs(value - reference) < 1.0 else float(value)
+        self._custom_curve = None
         self._apply_rev_limit()
 
     def _on_hold_rpm(self, value: float) -> None:
@@ -404,6 +435,7 @@ class EngineModule(FeatureModule):
         if vehicle is None or graph is None or not graph.live or self._engaged:
             return
         vehicle.set_curve_from(0, list(graph.live)[:-1])
+        self._custom_curve = list(graph.live)
         self._pending_edits.clear()
 
     def _reset_curve(self) -> None:
@@ -412,6 +444,7 @@ class EngineModule(FeatureModule):
             return
         vehicle.set_curve(self.stock_curve)
         self._torque_multiplier = 1.0
+        self._custom_curve = None
         self._pending_edits.clear()
         slider = self._widgets.get('torque')
         if slider is not None:
@@ -434,24 +467,19 @@ class EngineModule(FeatureModule):
         actions = QHBoxLayout()
         actions.setSpacing(8)
 
-        apply_button = QPushButton('Apply curve')
-        apply_button.setObjectName('Primary')
-        apply_button.setCursor(Qt.PointingHandCursor)
+        apply_button = PrimaryButton('Apply curve')
         apply_button.clicked.connect(self._commit_curve)
         actions.addWidget(apply_button)
 
-        double_button = QPushButton('Double')
-        double_button.setCursor(Qt.PointingHandCursor)
+        double_button = Button('Double')
         double_button.clicked.connect(lambda: graph.scale_selection(2.0))
         actions.addWidget(double_button)
 
-        halve_button = QPushButton('Halve')
-        halve_button.setCursor(Qt.PointingHandCursor)
+        halve_button = Button('Halve')
         halve_button.clicked.connect(lambda: graph.scale_selection(0.5))
         actions.addWidget(halve_button)
 
-        reset_button = QPushButton('Reset to stock')
-        reset_button.setCursor(Qt.PointingHandCursor)
+        reset_button = Button('Reset to stock')
         reset_button.clicked.connect(self._reset_curve)
         actions.addWidget(reset_button)
         actions.addStretch(1)
@@ -608,6 +636,7 @@ class EngineModule(FeatureModule):
 
     def load_state(self, data: dict) -> None:
         data = data or {}
+        self._custom_curve = None
 
         def _number(key, fallback, low=None, high=None):
             """Read a number defensively.
