@@ -1,11 +1,12 @@
 """Keeps an overlay window positioned over, and stacked above, the game."""
+
 from __future__ import annotations
 
 import ctypes
 import sys
 from ctypes import wintypes
 
-WINDOWS = sys.platform == 'win32'
+WINDOWS = sys.platform == "win32"
 
 GWL_EXSTYLE = -20
 GWLP_HWNDPARENT = -8
@@ -23,17 +24,23 @@ SWP_NOACTIVATE = 0x0010
 SWP_NOSENDCHANGING = 0x0400
 HWND_TOP = 0
 
-TITLE_HINT = 'forza horizon'
+TITLE_HINT = "forza horizon"
 
 if WINDOWS:
-    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
     user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
     user32.GetWindow.restype = wintypes.HWND
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
-                                    ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                    wintypes.UINT]
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
     user32.GetForegroundWindow.restype = wintypes.HWND
 
     if ctypes.sizeof(ctypes.c_void_p) == 8:
@@ -53,7 +60,7 @@ else:
 class Rect:
     """A client area in screen coordinates."""
 
-    __slots__ = ('x', 'y', 'width', 'height')
+    __slots__ = ("x", "y", "width", "height")
 
     def __init__(self, x: int = 0, y: int = 0, width: int = 0, height: int = 0):
         self.x = x
@@ -66,8 +73,13 @@ class Rect:
         return self.width > 0 and self.height > 0
 
     def __eq__(self, other) -> bool:
-        return (isinstance(other, Rect) and self.x == other.x and self.y == other.y
-                and self.width == other.width and self.height == other.height)
+        return (
+            isinstance(other, Rect)
+            and self.x == other.x
+            and self.y == other.y
+            and self.width == other.width
+            and self.height == other.height
+        )
 
 
 def client_rect(hwnd) -> Rect:
@@ -83,8 +95,7 @@ def client_rect(hwnd) -> Rect:
         return Rect()
     if not user32.ClientToScreen(hwnd, ctypes.byref(bottom_right)):
         return Rect()
-    return Rect(top_left.x, top_left.y,
-                bottom_right.x - top_left.x, bottom_right.y - top_left.y)
+    return Rect(top_left.x, top_left.y, bottom_right.x - top_left.x, bottom_right.y - top_left.y)
 
 
 def find_game_window(pid: int | None = None, exclude=None):
@@ -111,7 +122,7 @@ def find_game_window(pid: int | None = None, exclude=None):
         else:
             title = ctypes.create_unicode_buffer(256)
             user32.GetWindowTextW(hwnd, title, 256)
-            matched = TITLE_HINT in (title.value or '').lower()
+            matched = TITLE_HINT in (title.value or "").lower()
 
         if matched:
             bounds = client_rect(hwnd)
@@ -242,14 +253,21 @@ class GameWindowTracker:
             if above == self.overlay_hwnd:
                 return
             insert_after = HWND_TOP if (not above or above == self.overlay_hwnd) else above
-            user32.SetWindowPos(self.overlay_hwnd, insert_after, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
-                                | SWP_NOSENDCHANGING)
+            user32.SetWindowPos(
+                self.overlay_hwnd,
+                insert_after,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+            )
         except Exception:
             pass
 
-    def anchor(self, relative_x: float, relative_y: float,
-               width: int, height: int) -> tuple[int, int] | None:
+    def anchor(
+        self, relative_x: float, relative_y: float, width: int, height: int
+    ) -> tuple[int, int] | None:
         """Map a position inside the game's area to screen coordinates.
 
         ⚠️ The fraction is measured against the DRAGGABLE SPAN (`width - overlay_width`), not the

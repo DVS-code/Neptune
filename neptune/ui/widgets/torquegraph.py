@@ -1,4 +1,5 @@
 """Torque curve plot with draggable points."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -42,8 +43,9 @@ class TorqueGraph(QWidget):
         self._band_origin: QPointF | None = None
         self._band: QRectF | None = None
 
-    def set_data(self, stock, live, rpm_per_index=100.0, rpm=0.0,
-                 ceiling=None, editable=False) -> None:
+    def set_data(
+        self, stock, live, rpm_per_index=100.0, rpm=0.0, ceiling=None, editable=False
+    ) -> None:
         self.stock = list(stock or [])
         self.live = list(live or [])
         self.rpm_per_index = rpm_per_index or 100.0
@@ -70,13 +72,15 @@ class TorqueGraph(QWidget):
         return max(len(self.live) - 1, len(self.stock) - 1, 1)
 
     def _plot(self) -> QRectF:
-        return QRectF(MARGIN_LEFT, MARGIN_TOP,
-                      max(1.0, self.width() - MARGIN_LEFT - MARGIN_RIGHT),
-                      max(1.0, self.height() - MARGIN_TOP - MARGIN_BOTTOM))
+        return QRectF(
+            MARGIN_LEFT,
+            MARGIN_TOP,
+            max(1.0, self.width() - MARGIN_LEFT - MARGIN_RIGHT),
+            max(1.0, self.height() - MARGIN_TOP - MARGIN_BOTTOM),
+        )
 
     def _value_range(self) -> tuple[float, float]:
-        values = [value for value in (self.live[:-1] + self.stock[:-1])
-                  if value is not None]
+        values = [value for value in (self.live[:-1] + self.stock[:-1]) if value is not None]
         if not values:
             return 0.0, 1.0
         low = min(values)
@@ -117,8 +121,7 @@ class TorqueGraph(QWidget):
 
         if not self.live and not self.stock:
             painter.setPen(QColor(T.TEXT_FAINT))
-            painter.drawText(self.rect(), Qt.AlignCenter,
-                             'Attach to the game and load a car')
+            painter.drawText(self.rect(), Qt.AlignCenter, "Attach to the game and load a car")
             return
 
         painter.setPen(QPen(QColor(T.GRID), 1))
@@ -129,12 +132,12 @@ class TorqueGraph(QWidget):
         self._draw_axis(painter, plot)
 
         if self.stock and len(self.stock) > 2:
-            self._draw_curve(painter, self.stock[:-1], QColor(T.CURVE_STOCK),
-                             dashed=True, fill=False)
+            self._draw_curve(
+                painter, self.stock[:-1], QColor(T.CURVE_STOCK), dashed=True, fill=False
+            )
 
         if self.live and len(self.live) > 2:
-            self._draw_curve(painter, self.live[:-1], QColor(T.CURVE_LIVE),
-                             dashed=False, fill=True)
+            self._draw_curve(painter, self.live[:-1], QColor(T.CURVE_LIVE), dashed=False, fill=True)
             self._draw_points(painter)
 
         self._draw_needle(painter, plot)
@@ -159,8 +162,9 @@ class TorqueGraph(QWidget):
         rpm = 0.0
         while rpm <= top_rpm + 1e-6:
             x = plot.left() + plot.width() * (rpm / top_rpm)
-            painter.drawText(QRectF(x - 28, plot.bottom() + 5, 56, 16),
-                             Qt.AlignCenter, f'{rpm:.0f}')
+            painter.drawText(
+                QRectF(x - 28, plot.bottom() + 5, 56, 16), Qt.AlignCenter, f"{rpm:.0f}"
+            )
             rpm += step
 
     @staticmethod
@@ -170,8 +174,9 @@ class TorqueGraph(QWidget):
                 return candidate
         return 10000.0
 
-    def _draw_curve(self, painter: QPainter, values: list[float], colour: QColor,
-                    dashed: bool, fill: bool) -> None:
+    def _draw_curve(
+        self, painter: QPainter, values: list[float], colour: QColor, dashed: bool, fill: bool
+    ) -> None:
         if len(values) < 2:
             return
         plot = self._plot()
@@ -218,8 +223,9 @@ class TorqueGraph(QWidget):
                 continue
             painter.setBrush(QColor(T.ACCENT_BRIGHT) if selected else QColor(T.TEXT))
             radius = 4.0 if selected else 3.0
-            painter.drawEllipse(QPointF(self._x_for(index), self._y_for(values[index])),
-                                radius, radius)
+            painter.drawEllipse(
+                QPointF(self._x_for(index), self._y_for(values[index])), radius, radius
+            )
 
     def _draw_needle(self, painter: QPainter, plot: QRectF) -> None:
         if self.rpm <= 0 or self.rpm_per_index <= 0:

@@ -1,8 +1,10 @@
 """A labelled slider with an editable numeric field."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import LineEdit
 
 from neptune.ui.widgets.helpmark import HelpMark
 from neptune.ui.widgets.slider import Slider
@@ -17,9 +19,18 @@ class SliderRow(QWidget):
 
     changed = Signal(float)
 
-    def __init__(self, label: str, minimum: float, maximum: float, value: float,
-                 step: float = 0.01, decimals: int = 2, unit: str = '',
-                 hint: str = '', parent=None):
+    def __init__(
+        self,
+        label: str,
+        minimum: float,
+        maximum: float,
+        value: float,
+        step: float = 0.01,
+        decimals: int = 2,
+        unit: str = "",
+        hint: str = "",
+        parent=None,
+    ):
         super().__init__(parent)
         self._min = float(minimum)
         self._max = float(maximum)
@@ -35,8 +46,6 @@ class SliderRow(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(12)
 
-
-
         name = QWidget()
         name.setFixedWidth(LABEL_WIDTH)
         name_row = QHBoxLayout(name)
@@ -44,7 +53,7 @@ class SliderRow(QWidget):
         name_row.setSpacing(6)
 
         self._label = QLabel(label)
-        self._label.setObjectName('RowLabel')
+        self._label.setObjectName("RowLabel")
         name_row.addWidget(self._label)
 
         self._help = HelpMark(hint)
@@ -56,15 +65,16 @@ class SliderRow(QWidget):
         self._slider.moved.connect(self._on_slider)
         row.addWidget(self._slider, 1)
 
-        self._field = QLineEdit(self._format(self._value))
-        self._field.setObjectName('ValueEdit')
+        self._field = LineEdit()
+        self._field.setText(self._format(self._value))
+        self._field.setObjectName("ValueEdit")
         self._field.setFixedWidth(FIELD_WIDTH)
         self._field.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._field.editingFinished.connect(self._on_field)
         row.addWidget(self._field)
 
         self._unit = QLabel(unit)
-        self._unit.setObjectName('StatUnit')
+        self._unit.setObjectName("StatUnit")
         self._unit.setFixedWidth(UNIT_WIDTH)
         row.addWidget(self._unit)
 
@@ -85,7 +95,7 @@ class SliderRow(QWidget):
         return self._min + position * (self._max - self._min)
 
     def _format(self, value: float) -> str:
-        return f'{value:.{self._decimals}f}'
+        return f"{value:.{self._decimals}f}"
 
     def _on_slider(self, position: float) -> None:
         value = self._clamp(self._from_position(position))

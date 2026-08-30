@@ -1,24 +1,28 @@
 """Keybind capture, segmented selector and section heading."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from qfluentwidgets import (
+    CaptionLabel,
+    PushButton,
+    SegmentedWidget,
+    TitleLabel,
+    setCustomStyleSheet,
+)
 
 from neptune.core import input as inp
 from neptune.ui import theme as T
 
 
-class BindButton(QPushButton):
-
+class BindButton(PushButton):
     bound = Signal(object)
 
-    def __init__(self, binding: dict | None = None, parent=None,
-                 settings=None, key: str = ''):
+    def __init__(self, binding: dict | None = None, parent=None, settings=None, key: str = ""):
         super().__init__(parent)
         self._binding = binding
         self._listening = False
-
-
 
         self._settings = settings
         self._key = key
@@ -33,16 +37,18 @@ class BindButton(QPushButton):
         self._render()
 
     def _render(self) -> None:
+        # setCustomStyleSheet, not setStyleSheet as PushButton.__init__ already applied
         if self._listening:
-            self.setText('Press any key or button')
-            self.setStyleSheet(f'color: {T.ACCENT_BRIGHT}; border-color: {T.ACCENT};')
+            self.setText("Press any key or button")
+            listening = f"BindButton {{ color: {T.ACCENT_BRIGHT}; border-color: {T.ACCENT}; }}"
+            setCustomStyleSheet(self, listening, listening)
             return
-        self.setStyleSheet('')
-        if not self._binding or not self._binding.get('kind'):
-            self.setText('Click to bind')
+        setCustomStyleSheet(self, "", "")
+        if not self._binding or not self._binding.get("kind"):
+            self.setText("Click to bind")
             return
         source = inp.source_label(self._binding)
-        self.setText(f'{source}  ·  {self._binding.get("label", "?")}')
+        self.setText(f"{source}  ·  {self._binding.get('label', '?')}")
 
     def _start(self) -> None:
         if self._listening:
@@ -64,7 +70,7 @@ class BindButton(QPushButton):
         captured = inp.poll_any_input()
         if not captured:
             return
-        if captured.get('clear'):
+        if captured.get("clear"):
             self._binding = None
         else:
             self._binding = captured
@@ -72,7 +78,7 @@ class BindButton(QPushButton):
         self.bound.emit(self._binding)
 
     def _on_settings_changed(self, key: str) -> None:
-        if key != 'bindings' or self._settings is None or not self._key:
+        if key != "bindings" or self._settings is None or not self._key:
             return
         current = self._settings.binding(self._key)
         if current != self._binding:
@@ -88,88 +94,51 @@ class BindButton(QPushButton):
 
 
 class Segmented(QWidget):
-
     changed = Signal(str)
 
     def __init__(self, options: list[str], value: str | None = None, parent=None):
         super().__init__(parent)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
 
-        self._group = QButtonGroup(self)
-        self._group.setExclusive(True)
-        self._buttons: dict[str, QPushButton] = {}
+        self._widget = SegmentedWidget(self)
+        row.addWidget(self._widget)
+        self._options = list(options)
 
-        for index, option in enumerate(options):
-            button = QPushButton(option)
-            button.setCheckable(True)
-            button.setCursor(Qt.PointingHandCursor)
-            button.setStyleSheet(self._style(index, len(options)))
-            self._group.addButton(button)
-            self._buttons[option] = button
-            row.addWidget(button)
-            button.clicked.connect(lambda _checked, o=option: self.changed.emit(o))
+        for option in self._options:
+            self._widget.addItem(
+                routeKey=option,
+                text=option,
+                onClick=lambda _checked, o=option: self.changed.emit(o),
+            )
 
-        selected = value if value in self._buttons else (options[0] if options else None)
+        selected = (
+            value if value in self._options else (self._options[0] if self._options else None)
+        )
         if selected:
-            self._buttons[selected].setChecked(True)
-
-    @staticmethod
-    def _style(index: int, total: int) -> str:
-        radius = T.CONTROL_RADIUS
-        left = radius if index == 0 else 0
-        right = radius if index == total - 1 else 0
-        return f"""
-        QPushButton {{
-            background: {T.SURFACE_SUNKEN};
-            border: 1px solid {T.BORDER};
-            border-left-width: {1 if index == 0 else 0}px;
-            border-top-left-radius: {left}px;
-            border-bottom-left-radius: {left}px;
-            border-top-right-radius: {right}px;
-            border-bottom-right-radius: {right}px;
-            padding: 7px 15px;
-            color: {T.TEXT_MUTED};
-            font-weight: 550;
-        }}
-        QPushButton:hover {{ background: {T.SURFACE_HOVER}; color: {T.TEXT}; }}
-        QPushButton:checked {{
-            background: {T.ACCENT_MUTED};
-            color: {T.TEXT};
-            border-color: {T.ACCENT_DEEP};
-        }}
-        """
+            self._widget.setCurrentItem(selected)
 
     def value(self) -> str | None:
-        for option, button in self._buttons.items():
-            if button.isChecked():
-                return option
-        return None
+        return self._widget.currentRouteKey()
 
     def set_value(self, value: str, notify: bool = False) -> None:
-        button = self._buttons.get(value)
-        if button is None:
+        if value not in self._options:
             return
-        button.setChecked(True)
+        self._widget.setCurrentItem(value)
         if notify:
             self.changed.emit(value)
 
 
 class SectionHeading(QWidget):
-
-    def __init__(self, title: str, subtitle: str = '', parent=None):
+    def __init__(self, title: str, subtitle: str = "", parent=None):
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(3)
 
-        title_label = QLabel(title)
-        title_label.setObjectName('PageTitle')
-        outer.addWidget(title_label)
+        outer.addWidget(TitleLabel(title))
 
         if subtitle:
-            subtitle_label = QLabel(subtitle)
-            subtitle_label.setObjectName('PageSubtitle')
-            subtitle_label.setWordWrap(True)
-            outer.addWidget(subtitle_label)
+            caption = CaptionLabel(subtitle)
+            caption.setWordWrap(True)
+            outer.addWidget(caption)

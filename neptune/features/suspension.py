@@ -1,4 +1,5 @@
 """Suspension: ride height and air-ride drop."""
+
 from __future__ import annotations
 
 import threading
@@ -31,41 +32,39 @@ BOUNCE_DEFAULT_SPEED = 1.0
 BOUNCE_HZ = 60
 
 
-
-
 HARD_FLOOR_M = 0.01
 
 AXLE_OVERLAP = 0.7
 FRONT_WHEELS = (0, 1)
 WHEEL_COUNT = 4
 
-SEQUENCE_LABELS = {'together': 'Together', 'front': 'Front first', 'rear': 'Rear first'}
+SEQUENCE_LABELS = {"together": "Together", "front": "Front first", "rear": "Rear first"}
 
-HINT_AXLE = 'Raises or lowers this axle, as a share of normal ride height.'
-HINT_DROP = 'How far air ride drops the car.'
-HINT_FLOOR = 'The lowest the car may ever sit. Raise it if the car scrapes or bounces.'
-HINT_RAMP = 'How long the car takes to move between heights.'
-HINT_SEQUENCE = 'The order the axles move in. The raise plays the same order in reverse.'
-HINT_BOUNCE = 'Rocks the car up and down between the two heights, over and over.'
-HINT_BOUNCE_RANGE = 'The lowest and highest the car sits while bouncing.'
-HINT_BOUNCE_SPEED = 'How quickly the car cycles between the two heights.'
-HINT_BOUNCE_AUDIO = 'Plays a track on loop while the bounce is running.'
+HINT_AXLE = "Raises or lowers this axle, as a share of normal ride height."
+HINT_DROP = "How far air ride drops the car."
+HINT_FLOOR = "The lowest the car may ever sit. Raise it if the car scrapes or bounces."
+HINT_RAMP = "How long the car takes to move between heights."
+HINT_SEQUENCE = "The order the axles move in. The raise plays the same order in reverse."
+HINT_BOUNCE = "Rocks the car up and down between the two heights, over and over."
+HINT_BOUNCE_RANGE = "The lowest and highest the car sits while bouncing."
+HINT_BOUNCE_SPEED = "How quickly the car cycles between the two heights."
+HINT_BOUNCE_AUDIO = "Plays a track on loop while the bounce is running."
 
 
 def _axle_text(settings, first: float | None, second: float | None) -> str:
     if first is None or second is None:
-        return '--'
+        return "--"
     if abs(first - second) < 5e-4:
         return settings.format_height(first)
-    return f'{settings.format_height(first)} / {settings.format_height(second)}'
+    return f"{settings.format_height(first)} / {settings.format_height(second)}"
 
 
 class SuspensionModule(FeatureModule):
-    name = 'suspension'
-    title = 'Suspension'
-    subtitle = 'Ride height and air ride.'
-    icon = '▬'
-    group = 'Vehicle'
+    name = "suspension"
+    title = "Suspension"
+    subtitle = "Ride height and air ride."
+    icon = "spring.png"
+    group = "Vehicle"
     order = 30
 
     def __init__(self, settings):
@@ -79,7 +78,7 @@ class SuspensionModule(FeatureModule):
         self._drop_percent = DROP_PERCENT_DEFAULT
         self._floor_percent = DEFAULT_FLOOR_PERCENT
         self._ramp_seconds = DEFAULT_RAMP_SECONDS
-        self._sequence = 'together'
+        self._sequence = "together"
         self._lowered = False
 
         self._thread: threading.Thread | None = None
@@ -87,7 +86,6 @@ class SuspensionModule(FeatureModule):
         self._edge = inp.EdgeDetector()
         self._controls_dirty = False
         self._widgets: dict = {}
-
 
         self._bounce = False
         self._bounce_low = BOUNCE_DEFAULT_LOW
@@ -97,12 +95,12 @@ class SuspensionModule(FeatureModule):
         self._bounce_thread: threading.Thread | None = None
         self._bounce_cancel = threading.Event()
 
-
         from neptune.core.audio import Loop, OneShot
-        self._slam = OneShot('slam.wav')
-        self._maybach = Loop('maybach.mp3')
-        self._slam.set_volume(self.settings.get('airride_volume'))
-        self._maybach.set_volume(self.settings.get('maybach_volume'))
+
+        self._slam = OneShot("sfx/slam.wav")
+        self._maybach = Loop("sfx/maybach.mp3")
+        self._slam.set_volume(self.settings.get("airride_volume"))
+        self._maybach.set_volume(self.settings.get("maybach_volume"))
         self.settings.subscribe(self._on_settings_changed)
 
     def _on_settings_changed(self, key: str) -> None:
@@ -111,44 +109,47 @@ class SuspensionModule(FeatureModule):
         ⚠️ `Settings._notify` passes only the KEY, not the value — read it back rather than
         expecting a second argument, or every notification raises and is swallowed.
         """
-        if key == 'airride_volume':
-            self._slam.set_volume(self.settings.get('airride_volume'))
-        elif key == 'maybach_volume':
-            self._maybach.set_volume(self.settings.get('maybach_volume'))
+        if key == "airride_volume":
+            self._slam.set_volume(self.settings.get("airride_volume"))
+        elif key == "maybach_volume":
+            self._maybach.set_volume(self.settings.get("maybach_volume"))
 
     def _sync_controls(self) -> None:
-        for key, value in (('front', self._front_percent),
-                           ('rear', self._rear_percent),
-                           ('drop', self._drop_percent),
-                           ('floor', self._floor_percent),
-                           ('ramp', self._ramp_seconds),
-                           ('bounce_low', self._bounce_low),
-                           ('bounce_high', self._bounce_high),
-                           ('bounce_speed', self._bounce_speed)):
+        for key, value in (
+            ("front", self._front_percent),
+            ("rear", self._rear_percent),
+            ("drop", self._drop_percent),
+            ("floor", self._floor_percent),
+            ("ramp", self._ramp_seconds),
+            ("bounce_low", self._bounce_low),
+            ("bounce_high", self._bounce_high),
+            ("bounce_speed", self._bounce_speed),
+        ):
             slider = self._widgets.get(key)
             if slider is not None:
                 slider.set_value(value)
-        for key, state in (('bounce', self._bounce),
-                           ('bounce_audio', self._bounce_audio)):
+        for key, state in (("bounce", self._bounce), ("bounce_audio", self._bounce_audio)):
             row = self._widgets.get(key)
             if row is not None:
                 try:
                     row.toggle.set_value(bool(state))
                 except Exception:
                     pass
-        selector = self._widgets.get('sequence')
+        selector = self._widgets.get("sequence")
         if selector is not None:
             selector.set_value(SEQUENCE_LABELS[self._sequence])
 
     def binding(self) -> dict | None:
-        return self.settings.binding('suspension.airride')
+        return self.settings.binding("suspension.airride")
 
     def bindings(self) -> list[dict]:
-        return [{
-            'key': 'suspension.airride',
-            'label': 'Air ride up and down',
-            'description': 'Drops the car, or lifts it back to your set height.',
-        }]
+        return [
+            {
+                "key": "suspension.airride",
+                "label": "Air ride up and down",
+                "description": "Drops the car, or lifts it back to your set height.",
+            }
+        ]
 
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -164,7 +165,6 @@ class SuspensionModule(FeatureModule):
             return
         self.stock = list(values)
 
-
         radii = vehicle.wheel_radius
         if radii and all(r is not None and 0.05 < r < 1.0 for r in radii):
             self._radii = list(radii)
@@ -174,8 +174,11 @@ class SuspensionModule(FeatureModule):
     def on_car_changed(self, vehicle) -> None:
         self._cancel_ramp()
         self._lowered = False
+        self._front_percent = 0.0
+        self._rear_percent = 0.0
         self.stock = None
         self._radii = None
+        self._controls_dirty = True
         self.vehicle = vehicle
         self._capture_stock(vehicle)
 
@@ -185,7 +188,6 @@ class SuspensionModule(FeatureModule):
             self._write(self._target(self._lowered))
 
     def on_detach(self) -> None:
-
 
         self._bounce = False
         self._bounce_cancel.set()
@@ -227,6 +229,20 @@ class SuspensionModule(FeatureModule):
             self._capture_stock(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
+        self._reapply_if_rebaked(vehicle)
+
+    def _reapply_if_rebaked(self, vehicle) -> None:
+        """Re-apply ride height when the game has quietly put stock height back."""
+        if not self.stock or self._ramping or self._bounce:
+            return
+        if not (self._lowered or self._front_percent or self._rear_percent):
+            return
+        expected = self._target(self._lowered)
+        current = vehicle.ride_height if vehicle else None
+        if not current or len(current) != len(expected):
+            return
+        if any(abs(a - b) > 1e-3 for a, b in zip(current, expected, strict=True)):
+            self._write(expected)
 
     @property
     def _ramping(self) -> bool:
@@ -240,7 +256,6 @@ class SuspensionModule(FeatureModule):
         """
         percent = min(max(self._floor_percent, 0.0), 100.0)
         radius = self._radius_for(wheel)
-
 
         floor = max(self._stock_clearance(wheel) * (percent / 100.0), HARD_FLOOR_M)
         return max(floor + radius, value)
@@ -269,13 +284,14 @@ class SuspensionModule(FeatureModule):
         stock = self.stock or []
         if len(stock) < WHEEL_COUNT:
             return list(stock)
-        percents = (self._front_percent, self._front_percent,
-                    self._rear_percent, self._rear_percent)
+        percents = (
+            self._front_percent,
+            self._front_percent,
+            self._rear_percent,
+            self._rear_percent,
+        )
         out = []
-        for wheel, (value, percent) in enumerate(
-                zip(stock[:WHEEL_COUNT], percents, strict=True)):
-
-
+        for wheel, (value, percent) in enumerate(zip(stock[:WHEEL_COUNT], percents, strict=True)):
             shift = self._stock_clearance(wheel) * (percent / 100.0)
             out.append(self._clamp(value + shift, wheel))
         return out
@@ -304,13 +320,12 @@ class SuspensionModule(FeatureModule):
         self._cancel_ramp()
         self._lowered = not self._lowered
 
-
         if self._lowered:
             self._slam.play()
         start = self.vehicle.ride_height or self._target(not self._lowered)
-        self._start_ramp(start, self._target(self._lowered),
-                         self._ramp_seconds, reverse=not self._lowered)
-
+        self._start_ramp(
+            start, self._target(self._lowered), self._ramp_seconds, reverse=not self._lowered
+        )
 
     def set_bounce(self, enabled: bool) -> None:
         """Start or stop the continuous up/down cycle."""
@@ -320,15 +335,14 @@ class SuspensionModule(FeatureModule):
         self._bounce = enabled
         if enabled:
             if not self.stock or self.vehicle is None:
-
-
                 self._bounce = False
                 self._controls_dirty = True
                 return
             self._cancel_ramp()
             self._bounce_cancel.clear()
             self._bounce_thread = threading.Thread(
-                target=self._bounce_loop, daemon=True, name='neptune-maybach')
+                target=self._bounce_loop, daemon=True, name="neptune-maybach"
+            )
             self._bounce_thread.start()
             if self._bounce_audio:
                 self._maybach.start()
@@ -345,8 +359,9 @@ class SuspensionModule(FeatureModule):
 
         if self.stock and self.vehicle is not None:
             current = self.vehicle.ride_height
-            self._start_ramp(current or self._baseline(), self._target(self._lowered),
-                             SETTLE_SECONDS)
+            self._start_ramp(
+                current or self._baseline(), self._target(self._lowered), SETTLE_SECONDS
+            )
 
     def _set_bounce_audio(self, enabled: bool) -> None:
         self._bounce_audio = bool(enabled)
@@ -363,6 +378,7 @@ class SuspensionModule(FeatureModule):
         make the solver jolt — the same "ramp, never step" rule the air ride follows.
         """
         import math
+
         interval = 1.0 / BOUNCE_HZ
         phase = 0.0
         try:
@@ -377,8 +393,6 @@ class SuspensionModule(FeatureModule):
                 fraction = (1.0 - math.cos(phase)) * 0.5
                 target = low + (high - low) * fraction
 
-
-
                 heights = [self._clamp(target, wheel) for wheel in range(WHEEL_COUNT)]
                 if not self._write(heights):
                     return
@@ -388,9 +402,12 @@ class SuspensionModule(FeatureModule):
 
     def _start_ramp(self, start, end, seconds: float, reverse: bool = False) -> None:
         self._cancel.clear()
-        self._thread = threading.Thread(target=self._ramp, daemon=True,
-                                        name='neptune-airride',
-                                        args=(start, end, seconds, reverse))
+        self._thread = threading.Thread(
+            target=self._ramp,
+            daemon=True,
+            name="neptune-airride",
+            args=(start, end, seconds, reverse),
+        )
         self._thread.start()
 
     def _cancel_ramp(self) -> None:
@@ -401,10 +418,10 @@ class SuspensionModule(FeatureModule):
         self._thread = None
 
     def _axle_phase(self, wheel: int, reverse: bool) -> tuple[float, float]:
-        if self._sequence == 'together':
+        if self._sequence == "together":
             return 0.0, 1.0
         is_front = wheel in FRONT_WHEELS
-        front_leads = (self._sequence == 'front') != reverse
+        front_leads = (self._sequence == "front") != reverse
         leads = is_front == front_leads
         lead = 0.0 if leads else (1.0 - AXLE_OVERLAP)
         return lead, AXLE_OVERLAP
@@ -438,7 +455,7 @@ class SuspensionModule(FeatureModule):
             return
 
     def _set_offset(self, axle: str, value: float) -> None:
-        if axle == 'front':
+        if axle == "front":
             self._front_percent = float(value)
         else:
             self._rear_percent = float(value)
@@ -454,8 +471,11 @@ class SuspensionModule(FeatureModule):
             return
         target = self._target(self._lowered)
         current = self.vehicle.ride_height
-        if current and len(current) == len(target) and all(
-                abs(a - b) < 1e-4 for a, b in zip(current, target, strict=True)):
+        if (
+            current
+            and len(current) == len(target)
+            and all(abs(a - b) < 1e-4 for a, b in zip(current, target, strict=True))
+        ):
             return
         self._cancel_ramp()
         self._start_ramp(current or target, target, SETTLE_SECONDS)
@@ -469,7 +489,7 @@ class SuspensionModule(FeatureModule):
     def _reset_height(self) -> None:
         self._front_percent = 0.0
         self._rear_percent = 0.0
-        for key in ('front', 'rear'):
+        for key in ("front", "rear"):
             slider = self._widgets.get(key)
             if slider is not None:
                 slider.set_value(0.0)
@@ -479,114 +499,167 @@ class SuspensionModule(FeatureModule):
             self._start_ramp(start, self._target(self._lowered), SETTLE_SECONDS)
 
     def build_page(self, page) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QPushButton
+        from neptune.ui.widgets.buttons import Button, PrimaryButton
 
-        height_card = page.add_card(
-            'Ride height', 'Moves the height the car normally sits at.')
+        height_card = page.add_card("Ride height", "Moves the height the car normally sits at.")
 
-        front = SliderRow('Front', -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX, 0.0,
-                          step=1, decimals=0, unit='%', hint=HINT_AXLE)
-        front.changed.connect(lambda value: self._set_offset('front', value))
-        self._widgets['front'] = front
+        front = SliderRow(
+            "Front",
+            -LOWER_PERCENT_MAX,
+            RAISE_PERCENT_MAX,
+            0.0,
+            step=1,
+            decimals=0,
+            unit="%",
+            hint=HINT_AXLE,
+        )
+        front.changed.connect(lambda value: self._set_offset("front", value))
+        self._widgets["front"] = front
         height_card.add(front)
 
-        rear = SliderRow('Rear', -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX, 0.0,
-                         step=1, decimals=0, unit='%', hint=HINT_AXLE)
-        rear.changed.connect(lambda value: self._set_offset('rear', value))
-        self._widgets['rear'] = rear
+        rear = SliderRow(
+            "Rear",
+            -LOWER_PERCENT_MAX,
+            RAISE_PERCENT_MAX,
+            0.0,
+            step=1,
+            decimals=0,
+            unit="%",
+            hint=HINT_AXLE,
+        )
+        rear.changed.connect(lambda value: self._set_offset("rear", value))
+        self._widgets["rear"] = rear
         height_card.add(rear)
 
-        reset_button = QPushButton('Reset to stock height')
-        reset_button.setCursor(Qt.PointingHandCursor)
+        reset_button = Button("Reset to stock height")
         reset_button.clicked.connect(self._reset_height)
         height_card.add(reset_button)
 
-        air_card = page.add_card('Air ride', 'Drops the car on a key press.')
+        air_card = page.add_card("Air ride", "Drops the car on a key press.")
 
-        toggle_button = QPushButton('Drop or lift now')
-        toggle_button.setObjectName('Primary')
-        toggle_button.setCursor(Qt.PointingHandCursor)
+        toggle_button = PrimaryButton("Drop or lift now")
         toggle_button.clicked.connect(self.toggle)
         air_card.add(toggle_button)
 
-        bind_button = BindButton(self.binding(), settings=self.settings, key='suspension.airride')
+        bind_button = BindButton(self.binding(), settings=self.settings, key="suspension.airride")
         bind_button.bound.connect(
-            lambda binding: self.settings.set_binding('suspension.airride', binding))
-        self._widgets['bind'] = bind_button
-        air_card.add(FieldRow('Control', bind_button))
+            lambda binding: self.settings.set_binding("suspension.airride", binding)
+        )
+        self._widgets["bind"] = bind_button
+        air_card.add(FieldRow("Control", bind_button))
 
         air_card.add_divider()
 
-        drop = SliderRow('Drop by', 0.0, LOWER_PERCENT_MAX, DROP_PERCENT_DEFAULT,
-                         step=1, decimals=0, unit='%', hint=HINT_DROP)
-        drop.changed.connect(
-            lambda value: setattr(self, '_drop_percent', float(value)))
-        self._widgets['drop'] = drop
+        drop = SliderRow(
+            "Drop by",
+            0.0,
+            LOWER_PERCENT_MAX,
+            DROP_PERCENT_DEFAULT,
+            step=1,
+            decimals=0,
+            unit="%",
+            hint=HINT_DROP,
+        )
+        drop.changed.connect(lambda value: setattr(self, "_drop_percent", float(value)))
+        self._widgets["drop"] = drop
         air_card.add(drop)
 
-        floor = SliderRow('Lowest allowed', 0.0, 100.0,
-                          DEFAULT_FLOOR_PERCENT, step=1, decimals=0, unit='%',
-                          hint=HINT_FLOOR)
+        floor = SliderRow(
+            "Lowest allowed",
+            0.0,
+            100.0,
+            DEFAULT_FLOOR_PERCENT,
+            step=1,
+            decimals=0,
+            unit="%",
+            hint=HINT_FLOOR,
+        )
         floor.changed.connect(self._set_floor)
-        self._widgets['floor'] = floor
+        self._widgets["floor"] = floor
         air_card.add(floor)
 
-        ramp = SliderRow('Movement time', 0.3, 6.0, DEFAULT_RAMP_SECONDS,
-                         step=0.1, decimals=1, unit='s', hint=HINT_RAMP)
-        ramp.changed.connect(lambda value: setattr(self, '_ramp_seconds', float(value)))
-        self._widgets['ramp'] = ramp
+        ramp = SliderRow(
+            "Movement time",
+            0.3,
+            6.0,
+            DEFAULT_RAMP_SECONDS,
+            step=0.1,
+            decimals=1,
+            unit="s",
+            hint=HINT_RAMP,
+        )
+        ramp.changed.connect(lambda value: setattr(self, "_ramp_seconds", float(value)))
+        self._widgets["ramp"] = ramp
         air_card.add(ramp)
 
-        sequence = Segmented(list(SEQUENCE_LABELS.values()),
-                             SEQUENCE_LABELS[self._sequence])
+        sequence = Segmented(list(SEQUENCE_LABELS.values()), SEQUENCE_LABELS[self._sequence])
         sequence.changed.connect(self._set_sequence)
-        self._widgets['sequence'] = sequence
-        air_card.add(FieldRow('Order', sequence, hint=HINT_SEQUENCE))
+        self._widgets["sequence"] = sequence
+        air_card.add(FieldRow("Order", sequence, hint=HINT_SEQUENCE))
 
-        bounce_card = page.add_card(
-            'Maybach bounce', 'Rocks the car up and down on repeat.')
+        bounce_card = page.add_card("Maybach bounce", "Rocks the car up and down on repeat.")
 
-        bounce_toggle = ToggleRow('Bounce', self._bounce, hint=HINT_BOUNCE)
+        bounce_toggle = ToggleRow("Bounce", self._bounce, hint=HINT_BOUNCE)
         bounce_toggle.toggle.toggled_value.connect(self.set_bounce)
-        self._widgets['bounce'] = bounce_toggle
+        self._widgets["bounce"] = bounce_toggle
         bounce_card.add(bounce_toggle)
 
-        low = SliderRow('Lowest', BOUNCE_MIN_M, BOUNCE_MAX_M, self._bounce_low,
-                        step=0.005, decimals=3, unit='m', hint=HINT_BOUNCE_RANGE)
-        low.changed.connect(lambda value: setattr(self, '_bounce_low', float(value)))
-        self._widgets['bounce_low'] = low
+        low = SliderRow(
+            "Lowest",
+            BOUNCE_MIN_M,
+            BOUNCE_MAX_M,
+            self._bounce_low,
+            step=0.005,
+            decimals=3,
+            unit="m",
+            hint=HINT_BOUNCE_RANGE,
+        )
+        low.changed.connect(lambda value: setattr(self, "_bounce_low", float(value)))
+        self._widgets["bounce_low"] = low
         bounce_card.add(low)
 
-        high = SliderRow('Highest', BOUNCE_MIN_M, BOUNCE_MAX_M, self._bounce_high,
-                         step=0.005, decimals=3, unit='m')
-        high.changed.connect(lambda value: setattr(self, '_bounce_high', float(value)))
-        self._widgets['bounce_high'] = high
+        high = SliderRow(
+            "Highest",
+            BOUNCE_MIN_M,
+            BOUNCE_MAX_M,
+            self._bounce_high,
+            step=0.005,
+            decimals=3,
+            unit="m",
+        )
+        high.changed.connect(lambda value: setattr(self, "_bounce_high", float(value)))
+        self._widgets["bounce_high"] = high
         bounce_card.add(high)
 
-        speed = SliderRow('Speed', BOUNCE_SPEED_MIN, BOUNCE_SPEED_MAX,
-                          self._bounce_speed, step=0.1, decimals=1, unit='Hz',
-                          hint=HINT_BOUNCE_SPEED)
-        speed.changed.connect(lambda value: setattr(self, '_bounce_speed', float(value)))
-        self._widgets['bounce_speed'] = speed
+        speed = SliderRow(
+            "Speed",
+            BOUNCE_SPEED_MIN,
+            BOUNCE_SPEED_MAX,
+            self._bounce_speed,
+            step=0.1,
+            decimals=1,
+            unit="Hz",
+            hint=HINT_BOUNCE_SPEED,
+        )
+        speed.changed.connect(lambda value: setattr(self, "_bounce_speed", float(value)))
+        self._widgets["bounce_speed"] = speed
         bounce_card.add(speed)
 
-        audio_toggle = ToggleRow('Play sound', self._bounce_audio,
-                                 hint=HINT_BOUNCE_AUDIO)
+        audio_toggle = ToggleRow("Play sound", self._bounce_audio, hint=HINT_BOUNCE_AUDIO)
         audio_toggle.toggle.toggled_value.connect(self._set_bounce_audio)
-        self._widgets['bounce_audio'] = audio_toggle
+        self._widgets["bounce_audio"] = audio_toggle
         bounce_card.add(audio_toggle)
 
-        live_card = page.add_card('Live')
+        live_card = page.add_card("Live")
         stats = StatStrip()
-        stats.add('state', 'State', 'Stock')
-        stats.add('front', 'Front', '--')
-        stats.add('rear', 'Rear', '--')
-        self._widgets['stats'] = stats
+        stats.add("state", "State", "Stock")
+        stats.add("front", "Front", "--")
+        stats.add("rear", "Rear", "--")
+        self._widgets["stats"] = stats
         live_card.add(stats)
 
     def refresh(self, vehicle) -> None:
-        stats = self._widgets.get('stats')
+        stats = self._widgets.get("stats")
         if stats is None:
             return
 
@@ -603,32 +676,28 @@ class SuspensionModule(FeatureModule):
             return
 
         if self._ramping:
-            stats.set('state', 'Moving', T.WARN)
+            stats.set("state", "Moving", T.WARN)
         elif self._lowered:
-            stats.set('state', 'Lowered', T.ACCENT_BRIGHT)
+            stats.set("state", "Lowered", T.ACCENT_BRIGHT)
         else:
-            stats.set('state', 'Stock', T.TEXT)
+            stats.set("state", "Stock", T.TEXT)
 
-        stats.set('front', _axle_text(self.settings, current[0], current[1]), unit='')
-        stats.set('rear', _axle_text(self.settings, current[2], current[3]), unit='')
+        stats.set("front", _axle_text(self.settings, current[0], current[1]), unit="")
+        stats.set("rear", _axle_text(self.settings, current[2], current[3]), unit="")
 
     def save_state(self) -> dict:
         return {
-
-
-            'units': 'percent',
-            'front': self._front_percent,
-            'rear': self._rear_percent,
-            'drop': self._drop_percent,
-            'floor': self._floor_percent,
-            'ramp_seconds': self._ramp_seconds,
-            'sequence': self._sequence,
-
-
-            'bounce_low': self._bounce_low,
-            'bounce_high': self._bounce_high,
-            'bounce_speed': self._bounce_speed,
-            'bounce_audio': self._bounce_audio,
+            "units": "percent",
+            "front": self._front_percent,
+            "rear": self._rear_percent,
+            "drop": self._drop_percent,
+            "floor": self._floor_percent,
+            "ramp_seconds": self._ramp_seconds,
+            "sequence": self._sequence,
+            "bounce_low": self._bounce_low,
+            "bounce_high": self._bounce_high,
+            "bounce_speed": self._bounce_speed,
+            "bounce_audio": self._bounce_audio,
         }
 
     def load_state(self, data: dict) -> None:
@@ -653,8 +722,7 @@ class SuspensionModule(FeatureModule):
                 value = min(high, value)
             return value
 
-
-        legacy = data.get('units') != 'percent'
+        legacy = data.get("units") != "percent"
         typical = 0.15
 
         def _percent(key: str, fallback: float, low: float, high: float) -> float:
@@ -663,22 +731,21 @@ class SuspensionModule(FeatureModule):
                 return max(low, min(high, metres / typical * 100.0))
             return _number(key, fallback, low, high)
 
-        self._front_percent = _percent('front', 0.0, -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX)
-        self._rear_percent = _percent('rear', 0.0, -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX)
-        self._drop_percent = _percent('drop', DROP_PERCENT_DEFAULT, 0.0, LOWER_PERCENT_MAX)
-        self._floor_percent = _percent('floor', DEFAULT_FLOOR_PERCENT, 0.0, 100.0)
-        self._ramp_seconds = _number('ramp_seconds', DEFAULT_RAMP_SECONDS, 0.3, 6.0)
+        self._front_percent = _percent("front", 0.0, -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX)
+        self._rear_percent = _percent("rear", 0.0, -LOWER_PERCENT_MAX, RAISE_PERCENT_MAX)
+        self._drop_percent = _percent("drop", DROP_PERCENT_DEFAULT, 0.0, LOWER_PERCENT_MAX)
+        self._floor_percent = _percent("floor", DEFAULT_FLOOR_PERCENT, 0.0, 100.0)
+        self._ramp_seconds = _number("ramp_seconds", DEFAULT_RAMP_SECONDS, 0.3, 6.0)
 
-        sequence = data.get('sequence')
+        sequence = data.get("sequence")
         if sequence in SEQUENCE_LABELS:
             self._sequence = sequence
 
-        self._bounce_low = _number('bounce_low', BOUNCE_DEFAULT_LOW,
-                                   BOUNCE_MIN_M, BOUNCE_MAX_M)
-        self._bounce_high = _number('bounce_high', BOUNCE_DEFAULT_HIGH,
-                                    BOUNCE_MIN_M, BOUNCE_MAX_M)
-        self._bounce_speed = _number('bounce_speed', BOUNCE_DEFAULT_SPEED,
-                                     BOUNCE_SPEED_MIN, BOUNCE_SPEED_MAX)
-        self._bounce_audio = bool(data.get('bounce_audio', True))
+        self._bounce_low = _number("bounce_low", BOUNCE_DEFAULT_LOW, BOUNCE_MIN_M, BOUNCE_MAX_M)
+        self._bounce_high = _number("bounce_high", BOUNCE_DEFAULT_HIGH, BOUNCE_MIN_M, BOUNCE_MAX_M)
+        self._bounce_speed = _number(
+            "bounce_speed", BOUNCE_DEFAULT_SPEED, BOUNCE_SPEED_MIN, BOUNCE_SPEED_MAX
+        )
+        self._bounce_audio = bool(data.get("bounce_audio", True))
 
         self._controls_dirty = True

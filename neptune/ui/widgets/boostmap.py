@@ -10,6 +10,7 @@ and the full grid.
 Selection: click a cell, drag to extend, shift-click to extend from the anchor. Arrow keys move,
 +/- nudge, and typing a number sets the selection directly.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
@@ -39,9 +40,11 @@ HOT = QColor(206, 62, 62)
 
 def _blend(a: QColor, b: QColor, t: float) -> QColor:
     t = max(0.0, min(1.0, t))
-    return QColor(int(a.red() + (b.red() - a.red()) * t),
-                  int(a.green() + (b.green() - a.green()) * t),
-                  int(a.blue() + (b.blue() - a.blue()) * t))
+    return QColor(
+        int(a.red() + (b.red() - a.red()) * t),
+        int(a.green() + (b.green() - a.green()) * t),
+        int(a.blue() + (b.blue() - a.blue()) * t),
+    )
 
 
 def heat(value: float) -> QColor:
@@ -72,8 +75,7 @@ class BoostMap(QWidget):
         self._anchor: tuple[int, int] | None = None
         self._cursor: tuple[int, int] | None = None
         self._dragging = False
-        self._typed = ''
-
+        self._typed = ""
 
     def rows(self) -> int:
         return self._rows
@@ -85,8 +87,10 @@ class BoostMap(QWidget):
             return
         old = self._cells
 
-        self._cells = [list(old[min(index, len(old) - 1)]) if index < len(old)
-                       else list(old[-1]) for index in range(rows)]
+        self._cells = [
+            list(old[min(index, len(old) - 1)]) if index < len(old) else list(old[-1])
+            for index in range(rows)
+        ]
         self._rows = rows
         self._cursor = None
         self._anchor = None
@@ -132,7 +136,6 @@ class BoostMap(QWidget):
     def multiplier_at(self, rpm: float, load: float | None = None) -> float:
         return multiplier_at(self.flat(), self._rows, rpm, self._max_rpm, load)
 
-
     def _selection(self) -> list[tuple[int, int]]:
         if self._cursor is None:
             return []
@@ -142,8 +145,7 @@ class BoostMap(QWidget):
         return [(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
 
     def _apply_to_selection(self, function) -> None:
-        cells = self._selection() or [(r, c) for r in range(self._rows)
-                                      for c in range(COLUMNS)]
+        cells = self._selection() or [(r, c) for r in range(self._rows) for c in range(COLUMNS)]
         for row, column in cells:
             value = function(self._cells[row][column])
             self._cells[row][column] = max(MIN_MULT, min(MAX_MULT, value))
@@ -190,8 +192,7 @@ class BoostMap(QWidget):
 
     def smooth_selection(self) -> None:
         """Three-point average along each row, so a spiky table settles."""
-        cells = self._selection() or [(r, c) for r in range(self._rows)
-                                      for c in range(COLUMNS)]
+        cells = self._selection() or [(r, c) for r in range(self._rows) for c in range(COLUMNS)]
         rows = sorted({r for r, _ in cells})
         columns = sorted({c for _, c in cells})
         if len(columns) < 3:
@@ -200,7 +201,8 @@ class BoostMap(QWidget):
             source = list(self._cells[row])
             for column in columns[1:-1]:
                 self._cells[row][column] = (
-                    source[column - 1] + source[column] * 2 + source[column + 1]) / 4.0
+                    source[column - 1] + source[column] * 2 + source[column + 1]
+                ) / 4.0
         self.update()
         self.changed.emit()
 
@@ -209,25 +211,27 @@ class BoostMap(QWidget):
         self.update()
         self.changed.emit()
 
-
     def sizeHint(self):
         from PySide6.QtCore import QSize
+
         return QSize(520, LABEL_BOTTOM + CELL_MIN_HEIGHT * self._rows + 8)
 
     def minimumSizeHint(self):
         return self.sizeHint()
 
     def _grid(self) -> QRectF:
-        return QRectF(LABEL_LEFT, 0,
-                      max(1, self.width() - LABEL_LEFT - 4),
-                      max(1, self.height() - LABEL_BOTTOM))
+        return QRectF(
+            LABEL_LEFT,
+            0,
+            max(1, self.width() - LABEL_LEFT - 4),
+            max(1, self.height() - LABEL_BOTTOM),
+        )
 
     def _cell_rect(self, row: int, column: int) -> QRectF:
         grid = self._grid()
         width = grid.width() / COLUMNS
         height = grid.height() / self._rows
-        return QRectF(grid.left() + column * width, grid.top() + row * height,
-                      width, height)
+        return QRectF(grid.left() + column * width, grid.top() + row * height, width, height)
 
     def _cell_at(self, position) -> tuple[int, int] | None:
         grid = self._grid()
@@ -239,7 +243,6 @@ class BoostMap(QWidget):
             return (row, column)
         return None
 
-
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton:
             return
@@ -247,7 +250,7 @@ class BoostMap(QWidget):
         if cell is None:
             return
         self.setFocus()
-        self._typed = ''
+        self._typed = ""
         if event.modifiers() & Qt.ShiftModifier and self._anchor is not None:
             self._cursor = cell
         else:
@@ -279,8 +282,12 @@ class BoostMap(QWidget):
         if self._cursor is None:
             self._cursor = self._anchor = (0, 0)
 
-        moves = {Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1),
-                 Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0)}
+        moves = {
+            Qt.Key_Left: (0, -1),
+            Qt.Key_Right: (0, 1),
+            Qt.Key_Up: (-1, 0),
+            Qt.Key_Down: (1, 0),
+        }
         if key in moves:
             dr, dc = moves[key]
             row = max(0, min(self._rows - 1, self._cursor[0] + dr))
@@ -288,7 +295,7 @@ class BoostMap(QWidget):
             self._cursor = (row, column)
             if not (event.modifiers() & Qt.ShiftModifier):
                 self._anchor = self._cursor
-            self._typed = ''
+            self._typed = ""
             self.update()
             return
 
@@ -304,7 +311,7 @@ class BoostMap(QWidget):
                     self.set_selection(float(self._typed))
                 except ValueError:
                     pass
-                self._typed = ''
+                self._typed = ""
             return
         if key == Qt.Key_Backspace:
             self._typed = self._typed[:-1]
@@ -312,10 +319,9 @@ class BoostMap(QWidget):
             return
 
         text = event.text()
-        if text and (text.isdigit() or text == '.'):
+        if text and (text.isdigit() or text == "."):
             self._typed += text
             self.update()
-
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -331,8 +337,8 @@ class BoostMap(QWidget):
                 row = int(max(0.0, min(0.999, self._live_load)) * self._rows)
             live_cell = (row, column)
 
-        small = QFont('Segoe UI', 8)
-        cell_font = QFont('Segoe UI', 9)
+        small = QFont("Segoe UI", 8)
+        cell_font = QFont("Segoe UI", 9)
 
         for row in range(self._rows):
             for column in range(COLUMNS):
@@ -348,8 +354,7 @@ class BoostMap(QWidget):
 
                 painter.setFont(cell_font)
                 painter.setPen(QColor(240, 242, 246))
-                painter.drawText(rect, Qt.AlignCenter, f'{value:.2f}')
-
+                painter.drawText(rect, Qt.AlignCenter, f"{value:.2f}")
 
         if live_cell is not None and live_cell[0] < self._rows and live_cell[1] < COLUMNS:
             painter.setPen(QPen(QColor(T.ACCENT_BRIGHT), 2))
@@ -361,37 +366,51 @@ class BoostMap(QWidget):
             top_left = self._cell_rect(rows[0], columns[0])
             bottom_right = self._cell_rect(rows[-1], columns[-1])
             painter.setPen(QPen(QColor(255, 255, 255, 190), 2))
-            painter.drawRect(QRectF(top_left.left(), top_left.top(),
-                                    bottom_right.right() - top_left.left(),
-                                    bottom_right.bottom() - top_left.top())
-                             .adjusted(1, 1, -1, -1))
-
+            painter.drawRect(
+                QRectF(
+                    top_left.left(),
+                    top_left.top(),
+                    bottom_right.right() - top_left.left(),
+                    bottom_right.bottom() - top_left.top(),
+                ).adjusted(1, 1, -1, -1)
+            )
 
         painter.setFont(small)
         painter.setPen(QColor(T.TEXT_FAINT))
         for column in range(COLUMNS):
             rect = self._cell_rect(0, column)
             rpm = self._max_rpm * (column + 0.5) / COLUMNS
-            painter.drawText(QRectF(rect.left(), grid.bottom() + 2, rect.width(), LABEL_BOTTOM),
-                             Qt.AlignCenter, f'{rpm/1000:.1f}k')
+            painter.drawText(
+                QRectF(rect.left(), grid.bottom() + 2, rect.width(), LABEL_BOTTOM),
+                Qt.AlignCenter,
+                f"{rpm / 1000:.1f}k",
+            )
         if self._rows > 1:
             for row in range(self._rows):
                 rect = self._cell_rect(row, 0)
                 share = 100 - int(100 * row / self._rows)
-                painter.drawText(QRectF(0, rect.top(), LABEL_LEFT - 6, rect.height()),
-                                 Qt.AlignRight | Qt.AlignVCenter, f'{share}%')
+                painter.drawText(
+                    QRectF(0, rect.top(), LABEL_LEFT - 6, rect.height()),
+                    Qt.AlignRight | Qt.AlignVCenter,
+                    f"{share}%",
+                )
         else:
-            painter.drawText(QRectF(0, grid.top(), LABEL_LEFT - 6, grid.height()),
-                             Qt.AlignRight | Qt.AlignVCenter, 'boost')
+            painter.drawText(
+                QRectF(0, grid.top(), LABEL_LEFT - 6, grid.height()),
+                Qt.AlignRight | Qt.AlignVCenter,
+                "boost",
+            )
 
         if self._typed:
             painter.setPen(QColor(T.ACCENT_BRIGHT))
-            painter.drawText(QRectF(grid.left(), grid.top(), grid.width(), 18),
-                             Qt.AlignLeft | Qt.AlignVCenter, f'  typing {self._typed} — Enter to set')
+            painter.drawText(
+                QRectF(grid.left(), grid.top(), grid.width(), 18),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"  typing {self._typed} — Enter to set",
+            )
 
 
-def multiplier_at(flat, rows: int, rpm: float, max_rpm: float,
-                  load: float | None = None) -> float:
+def multiplier_at(flat, rows: int, rpm: float, max_rpm: float, load: float | None = None) -> float:
     """Look the table up at an RPM (and load), interpolating along the RPM axis.
 
     Module-level so the feature can evaluate the table without touching the widget.
@@ -403,10 +422,9 @@ def multiplier_at(flat, rows: int, rpm: float, max_rpm: float,
     if rows > 1 and load is not None:
         row = int(max(0.0, min(0.999, load)) * rows)
     base = row * COLUMNS
-    line = flat[base:base + COLUMNS]
+    line = flat[base : base + COLUMNS]
     if len(line) < COLUMNS:
         return DEFAULT_MULT
-
 
     position = max(0.0, min(1.0, rpm / max_rpm)) * COLUMNS - 0.5
     if position <= 0:

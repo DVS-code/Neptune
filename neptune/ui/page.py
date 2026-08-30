@@ -1,4 +1,5 @@
 """The scrollable page each feature builds into."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -14,7 +15,7 @@ COLUMN_MAX_WIDTH = 760
 class Page(QScrollArea):
     """A vertically scrolling column of cards."""
 
-    def __init__(self, title: str, subtitle: str = '', parent=None):
+    def __init__(self, title: str, subtitle: str = "", parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -23,8 +24,7 @@ class Page(QScrollArea):
         host = QWidget()
         host.setAttribute(Qt.WA_StyledBackground, False)
         outer = QHBoxLayout(host)
-        outer.setContentsMargins(T.PAGE_PADDING, T.PAGE_PADDING,
-                                 T.PAGE_PADDING, T.PAGE_PADDING)
+        outer.setContentsMargins(T.PAGE_PADDING, T.PAGE_PADDING, T.PAGE_PADDING, T.PAGE_PADDING)
         outer.setSpacing(0)
 
         column = QWidget()
@@ -40,7 +40,7 @@ class Page(QScrollArea):
         outer.addStretch(0)
         self.setWidget(host)
 
-    def add_card(self, title: str = '', caption: str = '') -> Card:
+    def add_card(self, title: str = "", caption: str = "") -> Card:
         card = Card(title, caption)
         self._column.addWidget(card)
         return card

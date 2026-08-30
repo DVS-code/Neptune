@@ -1,11 +1,15 @@
 """Neptune entry point."""
+
 from __future__ import annotations
 
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QColor, QGuiApplication, QPixmap
+from PySide6.QtWidgets import QApplication, QLabel
+from qfluentwidgets import Theme, setTheme, setThemeColor
 
+from neptune.core import paths
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import Runtime
 from neptune.core.settings import Settings
@@ -21,7 +25,8 @@ from neptune.features.turbo import TurboModule
 from neptune.ui import theme as T
 from neptune.ui.shell import Shell
 
-APP_ID = 'Neptune.FH6.Tool'
+APP_ID = "Neptune.FH6.Tool"
+SPLASH_WIDTH = 420
 
 
 def build_registry(settings: Settings) -> ModuleRegistry:
@@ -44,30 +49,58 @@ def build_registry(settings: Settings) -> ModuleRegistry:
 
 
 def main() -> int:
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         try:
             from ctypes import windll
+
             windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
         except Exception:
             pass
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     application = QApplication(sys.argv)
-    application.setApplicationName('Neptune')
-    application.setStyle('Fusion')
+    application.setApplicationName("Neptune")
+    application.setStyle("Fusion")
     application.setFont(T.ui_font())
+    setTheme(Theme.DARK)
+    setThemeColor(T.ACCENT)
     application.setStyleSheet(T.stylesheet())
+
+    # Shown for as long as Shell takes to build its pages, so the main window is only ever
+    # shown fully formed (see Shell.ready).
+    splash_path = paths.asset("icons/splash.png")
+    splash_pixmap = QPixmap(splash_path) if splash_path else QPixmap()
+    if splash_pixmap.isNull():
+        splash_pixmap = QPixmap(*T.WINDOW_DEFAULT)
+        splash_pixmap.fill(QColor(T.BG))
+    else:
+        splash_pixmap = splash_pixmap.scaledToWidth(
+            SPLASH_WIDTH, Qt.TransformationMode.SmoothTransformation
+        )
+
+    splash = QLabel()
+    splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.WindowStaysOnTopHint)
+    splash.setPixmap(splash_pixmap)
+    splash.setFixedSize(splash_pixmap.size())
+    screen = QGuiApplication.primaryScreen()
+    if screen is not None:
+        centre = screen.geometry().center()
+        splash.move(centre.x() - splash.width() // 2, centre.y() - splash.height() // 2)
+    splash.show()
+    application.processEvents()
 
     settings = Settings()
     registry = build_registry(settings)
     runtime = Runtime(registry)
 
     shell = Shell(registry, runtime, settings)
-    shell.show()
+    shell.ready.connect(splash.close)
+    shell.ready.connect(shell.show)
     return application.exec()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

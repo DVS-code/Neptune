@@ -1,4 +1,5 @@
 """The feature-module contract and the registry that drives it."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -10,11 +11,11 @@ if TYPE_CHECKING:
 class FeatureModule:
     """Base class for every feature. Subclasses override only what they need."""
 
-    name = 'unnamed'
-    title = 'Unnamed'
-    subtitle = ''
-    icon = ''
-    group = 'Vehicle'
+    name = "unnamed"
+    title = "Unnamed"
+    subtitle = ""
+    icon = ""
+    group = "Vehicle"
     order = 100
     ticks = True
     always_refresh = False
@@ -98,7 +99,7 @@ class ModuleRegistry:
     def dispatch(self, event: str, *args) -> None:
         """Call `event` on every module, isolating failures."""
         for module in self._modules:
-            if event in ('tick', 'tick_process') and not module.ticks:
+            if event in ("tick", "tick_process") and not module.ticks:
                 continue
             handler = getattr(module, event, None)
             if handler is None:
@@ -106,7 +107,7 @@ class ModuleRegistry:
             try:
                 handler(*args)
             except Exception as error:
-                self._errors.append(f'{module.title}: {error}')
+                self._errors.append(f"{module.title}: {error}")
 
     def take_errors(self) -> list[str]:
         errors, self._errors = self._errors, []

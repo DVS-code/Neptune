@@ -15,6 +15,7 @@ on these features — a missing file must never stop the car from moving.
 running on the runtime thread, so `play()`/`start()` are safe to call from anywhere: they marshal
 onto the owning thread with a queued invocation rather than touching the player directly.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QMetaObject, QObject, Qt, QUrl, Slot
@@ -43,6 +44,7 @@ class OneShot(QObject):
             return
         try:
             from PySide6.QtMultimedia import QSoundEffect
+
             effect = QSoundEffect(self)
             effect.setSource(QUrl.fromLocalFile(path))
             self._effect = effect
@@ -64,7 +66,7 @@ class OneShot(QObject):
         """Fire the sample. Safe to call from any thread."""
         if self._effect is None:
             return
-        QMetaObject.invokeMethod(self, '_play', Qt.QueuedConnection)
+        QMetaObject.invokeMethod(self, "_play", Qt.QueuedConnection)
 
     @Slot()
     def _play(self) -> None:
@@ -80,6 +82,7 @@ class OneShot(QObject):
             return
         try:
             from PySide6.QtMultimedia import QSoundEffect
+
             if effect.isLoaded():
                 effect.play()
                 return
@@ -112,11 +115,11 @@ class Loop(QObject):
             return
         try:
             from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
             player = QMediaPlayer(self)
             output = QAudioOutput(self)
             player.setAudioOutput(output)
             player.setSource(QUrl.fromLocalFile(path))
-
 
             player.setLoops(QMediaPlayer.Infinite)
             output.setVolume(self._volume)
@@ -139,17 +142,18 @@ class Loop(QObject):
     def start(self) -> None:
         if self._player is None:
             return
-        QMetaObject.invokeMethod(self, '_start', Qt.QueuedConnection)
+        QMetaObject.invokeMethod(self, "_start", Qt.QueuedConnection)
 
     def stop(self) -> None:
         if self._player is None:
             return
-        QMetaObject.invokeMethod(self, '_stop', Qt.QueuedConnection)
+        QMetaObject.invokeMethod(self, "_stop", Qt.QueuedConnection)
 
     @Slot()
     def _start(self) -> None:
         try:
             from PySide6.QtMultimedia import QMediaPlayer
+
             if self._player.playbackState() != QMediaPlayer.PlayingState:
                 self._player.play()
         except Exception:

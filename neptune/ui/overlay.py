@@ -1,4 +1,5 @@
 """A floating gauge that sits over the game."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, QTimer
@@ -18,12 +19,20 @@ MIN_SIZE = 120
 MAX_SIZE = 420
 DEFAULT_POSITION = (0.86, 0.78)
 
-WIDE_MODES = ('Bar',)
+WIDE_MODES = ("Bar",)
 WIDE_RATIO = 0.40
 DIGITAL_RATIO = 0.62
 
-SCALE_LADDER = (15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0,
-                250.0, 400.0, 600.0, 1000.0)
+SCALE_LADDER = (15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 250.0, 400.0, 600.0, 1000.0)
+
+
+def dimensions_for(mode: str, size: int) -> tuple[int, int]:
+    """Get the width and height of the gauge for a given mode and height."""
+    if mode in WIDE_MODES:
+        return size, max(60, int(size * WIDE_RATIO))
+    if mode == "Digital":
+        return size, int(size * DIGITAL_RATIO)
+    return size, size
 
 
 def scale_for(value: float, floor: float) -> float:
@@ -39,8 +48,7 @@ class GaugeOverlay(QWidget):
     """A frameless window holding the gauge, driven by its own frame timer."""
 
     def __init__(self, parent=None):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool
-                         | Qt.WindowStaysOnTopHint)
+        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
@@ -77,12 +85,7 @@ class GaugeOverlay(QWidget):
         self.resize(*self._dimensions())
 
     def _dimensions(self) -> tuple[int, int]:
-        mode = self.face.mode
-        if mode in WIDE_MODES:
-            return self._size, max(60, int(self._size * WIDE_RATIO))
-        if mode == 'Digital':
-            return self._size, int(self._size * DIGITAL_RATIO)
-        return self._size, self._size
+        return dimensions_for(self.face.mode, self._size)
 
     def set_settings(self, settings) -> None:
         self._settings = settings
@@ -106,8 +109,7 @@ class GaugeOverlay(QWidget):
         self._reposition()
 
     def set_position(self, relative_x: float, relative_y: float) -> None:
-        self._position = (max(0.0, min(1.0, relative_x)),
-                          max(0.0, min(1.0, relative_y)))
+        self._position = (max(0.0, min(1.0, relative_x)), max(0.0, min(1.0, relative_y)))
         self._reposition()
 
     def position(self) -> tuple[float, float]:
@@ -164,8 +166,9 @@ class GaugeOverlay(QWidget):
                 value = boost
                 if self._settings is not None:
                     value, _unit = self._settings.pressure(boost)
-                self.face.set_value(max(0.0, value),
-                                    gear=vehicle.gear if self.face.show_gear else None)
+                self.face.set_value(
+                    max(0.0, value), gear=vehicle.gear if self.face.show_gear else None
+                )
 
             self._ceiling_countdown -= 1
             if self._ceiling_countdown <= 0:
@@ -185,13 +188,11 @@ class GaugeOverlay(QWidget):
 
             ceiling = None
             if O.is_supercharged(self._blower_peak, vehicle.blower_ceiling):
-                ceiling = O.boost_to_gauge(max(self._blower_peak,
-                                               vehicle.blower_ceiling or 0.0))
+                ceiling = O.boost_to_gauge(max(self._blower_peak, vehicle.blower_ceiling or 0.0))
             else:
                 turbo = vehicle.turbo_block()
-                raw = turbo.get('max_boost')
-                if raw and not O.is_naturally_aspirated(
-                        raw, turbo.get('turbine_limit')):
+                raw = turbo.get("max_boost")
+                if raw and not O.is_naturally_aspirated(raw, turbo.get("turbine_limit")):
                     ceiling = O.boost_to_gauge(raw)
 
             if ceiling is None or ceiling <= 0:
@@ -223,8 +224,7 @@ class GaugeOverlay(QWidget):
         if self._tracker is None:
             return
         width, height = self._dimensions()
-        placed = self._tracker.anchor(self._position[0], self._position[1],
-                                      width, height)
+        placed = self._tracker.anchor(self._position[0], self._position[1], width, height)
         if placed is None:
             return
         self.move(placed[0], placed[1])

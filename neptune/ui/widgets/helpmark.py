@@ -4,6 +4,7 @@ Replaces the paragraph of grey text that used to sit under every control. The te
 identical — it just stays out of the way until asked for, which keeps a page of ten
 settings readable instead of doubling its height in explanations nobody is reading yet.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt
@@ -19,11 +20,10 @@ WRAP_CHARS = 62
 class HelpMark(QWidget):
     """A circled question mark whose tooltip carries the explanation."""
 
-    def __init__(self, text: str = '', parent=None):
+    def __init__(self, text: str = "", parent=None):
         super().__init__(parent)
         self.setFixedSize(SIZE, SIZE)
         self.setCursor(Qt.WhatsThisCursor)
-
 
         self.setAttribute(Qt.WA_Hover, True)
         self._hover = False
@@ -31,12 +31,11 @@ class HelpMark(QWidget):
 
     def set_text(self, text: str) -> None:
         """Set the explanation. Also drives whether the mark shows at all."""
-        self._text = (text or '').strip()
+        self._text = (text or "").strip()
 
-
-
-        self.setToolTip(f'<div style="width:{WRAP_CHARS}em">{self._text}</div>'
-                        if self._text else '')
+        self.setToolTip(
+            f'<div style="width:{WRAP_CHARS}em">{self._text}</div>' if self._text else ""
+        )
         self.setVisible(bool(self._text))
 
     def text(self) -> str:
@@ -57,8 +56,7 @@ class HelpMark(QWidget):
         mark and gets nothing reasonably concludes it is broken.
         """
         if event.button() == Qt.LeftButton and self._text:
-            QToolTip.showText(self.mapToGlobal(QPoint(0, self.height())),
-                              self.toolTip(), self)
+            QToolTip.showText(self.mapToGlobal(QPoint(0, self.height())), self.toolTip(), self)
 
     def paintEvent(self, _event) -> None:
         """A ringed question mark.
@@ -81,8 +79,8 @@ class HelpMark(QWidget):
         painter.drawEllipse(1, 1, SIZE - 3, SIZE - 3)
 
         font = QFont(self.font())
-        font.setPixelSize(SIZE - 5)
+        font.setPixelSize(SIZE - 7)
         font.setWeight(QFont.Bold)
         painter.setFont(font)
         painter.setPen(QColor(glyph))
-        painter.drawText(self.rect(), Qt.AlignCenter, '?')
+        painter.drawText(self.rect(), Qt.AlignCenter, "?")

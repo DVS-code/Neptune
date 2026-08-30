@@ -1,11 +1,12 @@
-"""The application window: sidebar navigation, page host and status bar."""
+"""The application window: sidebar navigation and page host."""
+
 from __future__ import annotations
 
 import sys
 from ctypes import byref, c_int, sizeof, windll
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
@@ -19,14 +20,19 @@ from PySide6.QtWidgets import (
 from neptune.core import paths
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import STATE_DETACHED, STATE_READY, STATE_WAITING, Runtime
-from neptune.ui import icons
 from neptune.ui import theme as T
 from neptune.ui.page import Page
+from neptune.ui.widgets.buttons import Button
+from neptune.ui.widgets.iconbutton import IconButton, load_icon, tinted
+from neptune.ui.widgets.overlaypanel import OverlayPanel
 from neptune.ui.widgets.wordmark import Wordmark
 
 REFRESH_MS = 90
-GROUP_ORDER = ('Vehicle', 'World', 'Tool')
-NAV_ICON_WIDTH = 18
+GROUP_ORDER = ("Vehicle", "World", "Tool")
+NAV_ICON_WIDTH = 24
+EXCLUDED_FROM_NAV = {"presets", "settings"}
+ATTACH_ICON_SIZE = 22
+TOPBAR_HEIGHT = 56
 
 STATE_COLOURS = {
     STATE_DETACHED: T.TEXT_FAINT,
@@ -59,17 +65,24 @@ class StatusDot(QWidget):
 class Shell(QWidget):
     """The main window."""
 
+    ready = Signal()
+    update_available = Signal(object)
+
     def __init__(self, registry: ModuleRegistry, runtime: Runtime, settings):
         super().__init__()
         self.registry = registry
         self.runtime = runtime
         self.settings = settings
         self._pages: dict[str, int] = {}
+        self._overlay_pages: dict[str, Page] = {}
         self._nav: dict[str, QPushButton] = {}
         self._nav_parts: dict[str, tuple[QLabel, QLabel]] = {}
+        self._nav_pixmaps: dict[str, tuple[QPixmap | None, QPixmap | None]] = {}
+        self._last_attached_state: bool | None = None
+        self.update_available.connect(self._offer_update)
 
-        self.setObjectName('Root')
-        self.setWindowTitle('Neptune')
+        self.setObjectName("Root")
+        self.setWindowTitle("Neptune")
         self.setMinimumSize(*T.WINDOW_MIN)
         self.resize(*T.WINDOW_DEFAULT)
         self._apply_icon()
@@ -83,188 +96,213 @@ class Shell(QWidget):
         right.setContentsMargins(0, 0, 0, 0)
         right.setSpacing(0)
 
+        right.addWidget(self._build_topbar())
         self.stack = QStackedWidget()
         right.addWidget(self.stack, 1)
-        right.addWidget(self._build_status_bar())
         root.addLayout(right, 1)
 
-        self._build_pages()
-
+        self._build_queue: list = []
+        self._built: list = []
         self._timer = QTimer(self)
         self._timer.setInterval(REFRESH_MS)
         self._timer.timeout.connect(self._refresh)
+
+        QTimer.singleShot(0, self._start_building_pages)
+
+    def _start_building_pages(self) -> None:
+        grouped: dict[str, list] = {}
+        for module in self.registry:
+            grouped.setdefault(module.group, []).append(module)
+        for group in GROUP_ORDER:
+            self._build_queue.extend(grouped.get(group, []))
+        self._build_next_page()
+
+    def _build_next_page(self) -> None:
+        if not self._build_queue:
+            self._reveal_pages()
+            return
+        module = self._build_queue.pop(0)
+        self._built.append((module, self._build_page(module)))
+        QTimer.singleShot(0, self._build_next_page)
+
+    def _reveal_pages(self) -> None:
+        """Wire every built page into the sidebar/stack in one pass, then start the app."""
+        first = None
+        for module, page in self._built:
+            if module.name in EXCLUDED_FROM_NAV:
+                self._overlay_pages[module.name] = page
+            else:
+                self._pages[module.name] = self.stack.addWidget(page)
+                self._add_nav_item(module)
+                if first is None:
+                    first = module.name
+        self._built = []
+
+        if first:
+            self.show_page(first)
+
+        self._overlay = OverlayPanel(self)
+        self._overlay.setGeometry(self.rect())
+
         self._timer.start()
 
-        QTimer.singleShot(0, self._enable_dark_titlebar)
-        if self.settings.get('auto_attach'):
+        if self.settings.get("auto_attach"):
             QTimer.singleShot(250, self._auto_attach)
 
+        self.ready.emit()
+
+    @staticmethod
+    def _build_page(module) -> Page:
+        page = Page(module.title, module.subtitle)
+        module.build_page(page)
+        page.finish()
+        return page
+
     def _apply_icon(self) -> None:
-        icon_path = paths.asset('neptune.ico')
+        icon_path = paths.asset("icons/neptune.ico")
         if icon_path:
             self.setWindowIcon(QIcon(icon_path))
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
-        sidebar.setObjectName('Sidebar')
+        sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(T.SIDEBAR_WIDTH)
 
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(14, 22, 14, 16)
+        layout.setContentsMargins(14, 20, 14, 16)
         layout.setSpacing(0)
-
-        wordmark = Wordmark()
-        wordmark.setContentsMargins(10, 0, 0, 0)
-        layout.addWidget(wordmark)
-        layout.addSpacing(24)
 
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
         self._nav_layout = QVBoxLayout()
         self._nav_layout.setContentsMargins(0, 0, 0, 0)
         self._nav_layout.setSpacing(2)
+        layout.addStretch(1)
         layout.addLayout(self._nav_layout)
         layout.addStretch(1)
 
-        self.attach_button = QPushButton('Attach to game')
-        self.attach_button.setObjectName('Primary')
-        self.attach_button.setCursor(Qt.PointingHandCursor)
-        self.attach_button.clicked.connect(self._toggle_attach)
-        layout.addWidget(self.attach_button)
-        layout.addSpacing(6)
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(4, 0, 4, 0)
+        status_row.setSpacing(8)
 
-        self.restore_button = QPushButton('Restore everything')
-        self.restore_button.setCursor(Qt.PointingHandCursor)
+        self.status_dot = StatusDot()
+        status_row.addWidget(self.status_dot)
+
+        self.status_text = QLabel("Not attached")
+        self.status_text.setObjectName("StatusText")
+        status_row.addWidget(self.status_text, 1)
+
+        self.attach_icon_button = IconButton("dettached.png", "Attach to game")
+        self.attach_icon_button.setFixedSize(ATTACH_ICON_SIZE, ATTACH_ICON_SIZE)
+        self.attach_icon_button.setIconSize(QSize(14, 14))
+        self.attach_icon_button.clicked.connect(self._toggle_attach)
+        status_row.addWidget(self.attach_icon_button)
+
+        layout.addLayout(status_row)
+        layout.addSpacing(10)
+
+        self.restore_button = Button("Restore everything")
         self.restore_button.clicked.connect(self._restore_all)
         layout.addWidget(self.restore_button)
         return sidebar
 
-    def _add_nav_group(self, title: str) -> None:
-        label = QLabel(title.upper())
-        label.setObjectName('NavGroup')
-        label.setContentsMargins(0, 14, 0, 6)
-        self._nav_layout.addWidget(label)
+    def _build_topbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("TopBar")
+        bar.setFixedHeight(TOPBAR_HEIGHT)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(24, 0, 20, 0)
+        layout.setSpacing(6)
+
+        layout.addStretch(1)
+        layout.addWidget(Wordmark())
+        layout.addStretch(1)
+
+        self.profile_button = IconButton("profile.png", "Presets")
+        self.profile_button.clicked.connect(lambda: self._open_overlay("presets"))
+        layout.addWidget(self.profile_button)
+
+        self.settings_button = IconButton("settings.png", "Settings")
+        self.settings_button.clicked.connect(lambda: self._open_overlay("settings"))
+        layout.addWidget(self.settings_button)
+
+        return bar
 
     def _add_nav_item(self, module) -> None:
-        """One sidebar row: an icon in a fixed column, then the title.
-
-        The icon is a child label rather than part of the button's own text. Padding the
-        text with spaces cannot line the icons up — the icon font and the interface font
-        have different advance widths, so every row started at a slightly different x and
-        the column visibly wandered. A fixed-width label pins them to a grid, and it also
-        lets the icon carry its own font and colour without restyling the label.
-        """
+        """One sidebar row: a tinted PNG icon in a fixed column, then the title."""
         button = QPushButton()
-        button.setObjectName('NavItem')
+        button.setObjectName("NavItem")
         button.setCheckable(True)
         button.setCursor(Qt.PointingHandCursor)
 
         row = QHBoxLayout(button)
-        row.setContentsMargins(12, 0, 12, 0)
-        row.setSpacing(10)
+        row.setContentsMargins(14, 0, 14, 0)
+        row.setSpacing(12)
 
-        mark = QLabel(icons.get(module.name))
-        mark.setObjectName('NavIcon')
+        mark = QLabel()
+        mark.setObjectName("NavIcon")
         mark.setFixedWidth(NAV_ICON_WIDTH)
         mark.setAlignment(Qt.AlignCenter)
-
-
-
-        icon_font = QFont(icons.font_family())
-        icon_font.setPixelSize(T.SIZE_ICON)
-        mark.setFont(icon_font)
         row.addWidget(mark)
 
-        label = QLabel(module.title)
-        label.setObjectName('NavLabel')
+        label = QLabel(module.title.upper())
+        label.setObjectName("NavLabel")
         row.addWidget(label)
         row.addStretch(1)
 
         button.clicked.connect(lambda _checked, name=module.name: self.show_page(name))
         self._nav_group.addButton(button)
         self._nav_layout.addWidget(button)
+        self._nav_layout.addSpacing(16)
         self._nav[module.name] = button
         self._nav_parts[module.name] = (mark, label)
+        self._nav_pixmaps[module.name] = self._nav_icon_variants(module.icon)
         self._paint_nav(module.name, selected=False)
 
-    def _paint_nav(self, name: str, selected: bool) -> None:
-        """Colour one nav row's icon and title for its state.
+    @staticmethod
+    def _nav_icon_variants(icon_file: str) -> tuple[QPixmap | None, QPixmap | None]:
+        """Read, tint and scale one nav icon once, as (selected, unselected)."""
+        source = load_icon(icon_file) if icon_file else None
+        if source is None:
+            return (None, None)
+        selected, unselected = (
+            tinted(source, colour).scaled(
+                T.SIZE_ICON, T.SIZE_ICON, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            for colour in (T.TEXT_ON_ACCENT, T.TEXT)
+        )
+        return (selected, unselected)
 
-        Done here rather than in the stylesheet because Qt's descendant state selectors
-        (`QPushButton:checked QLabel`) match children whatever the parent's real state is,
-        so every row would render as selected.
-        """
+    def _paint_nav(self, name: str, selected: bool) -> None:
+        """Colour one nav row's icon and title for its state."""
         parts = self._nav_parts.get(name)
         if parts is None:
             return
         mark, label = parts
-        mark.setStyleSheet(
-            f'color: {T.ACCENT_BRIGHT if selected else T.TEXT_FAINT}; background: transparent;')
-        label.setStyleSheet(
-            f'color: {T.TEXT if selected else T.TEXT_MUTED}; background: transparent;'
-            f' font-weight: {600 if selected else 500};')
+        on, off = self._nav_pixmaps.get(name, (None, None))
+        pixmap = on if selected else off
+        if pixmap is not None:
+            mark.setPixmap(pixmap)
+        colour = T.TEXT_ON_ACCENT if selected else T.TEXT
+        label.setStyleSheet(f"color: {colour}; background: transparent;")
 
-    def _build_status_bar(self) -> QWidget:
-        bar = QWidget()
-        bar.setObjectName('StatusBar')
-        bar.setFixedHeight(38)
+    def _paint_attach_icon(self, attached: bool) -> None:
+        icon_name = "attached.png" if attached else "dettached.png"
+        self.attach_icon_button.set_icon(icon_name)
+        self.attach_icon_button.setToolTip("Detach" if attached else "Attach to game")
 
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(18, 0, 18, 0)
-        layout.setSpacing(10)
-
-        self.status_dot = StatusDot()
-        layout.addWidget(self.status_dot)
-
-        self.status_text = QLabel('Not attached')
-        self.status_text.setObjectName('StatusText')
-        layout.addWidget(self.status_text)
-        layout.addStretch(1)
-
-
-
-        self._metrics: list[QLabel] = []
-        self._metric_seps: list[QLabel] = []
-        for index, name in enumerate(('rpm', 'speed', 'gear', 'boost')):
-            if index:
-                separator = QLabel('·')
-                separator.setObjectName('StatDivider')
-                layout.addWidget(separator)
-                self._metric_seps.append(separator)
-            label = QLabel('')
-            label.setObjectName('StatMetric')
-            setattr(self, f'metric_{name}', label)
-            layout.addWidget(label)
-            self._metrics.append(label)
-        return bar
-
-    def _show_metrics(self, visible: bool) -> None:
-        """Hide the dividers along with the readings, so no stray dots are left behind."""
-        for separator in self._metric_seps:
-            separator.setVisible(visible)
-
-    def _build_pages(self) -> None:
-        grouped: dict[str, list] = {}
-        for module in self.registry:
-            grouped.setdefault(module.group, []).append(module)
-
-        first = None
-        for group in GROUP_ORDER:
-            modules = grouped.get(group)
-            if not modules:
-                continue
-            self._add_nav_group(group)
-            for module in modules:
-                page = Page(module.title, module.subtitle)
-                module.build_page(page)
-                page.finish()
-                self._pages[module.name] = self.stack.addWidget(page)
-                self._add_nav_item(module)
-                if first is None:
-                    first = module.name
-
-        if first:
-            self.show_page(first)
+    def _open_overlay(self, name: str) -> None:
+        page = self._overlay_pages.get(name)
+        if page is None:
+            return
+        module = self.registry.get(name)
+        if module is not None:
+            try:
+                module.refresh(self.runtime.vehicle)
+            except Exception:
+                pass
+        self._overlay.open(page, self.grab())
 
     def show_page(self, name: str) -> None:
         index = self._pages.get(name)
@@ -287,17 +325,15 @@ class Shell(QWidget):
     def _auto_attach(self) -> None:
         from neptune.memory import offsets as O
         from neptune.memory.process import game_is_running
+
         if game_is_running(O.GAME_EXE):
             self._toggle_attach()
 
     def _toggle_attach(self) -> None:
         if self.runtime.attached:
             self.runtime.detach()
-            self.attach_button.setText('Attach to game')
-            return
-        ok, _message = self.runtime.attach()
-        if ok:
-            self.attach_button.setText('Detach')
+        else:
+            self.runtime.attach()
 
     def _restore_all(self) -> None:
         self.runtime.restore_all()
@@ -333,27 +369,11 @@ class Shell(QWidget):
             self._set_text(self.status_text, message)
             self.status_dot.set_colour(STATE_COLOURS.get(state, T.TEXT_FAINT))
 
-        if not self.runtime.attached:
-            self._set_text(self.attach_button, 'Attach to game')
+        if self.runtime.attached != self._last_attached_state:
+            self._last_attached_state = self.runtime.attached
+            self._paint_attach_icon(self.runtime.attached)
 
         vehicle = self.runtime.vehicle
-        if vehicle is None:
-            for label in self._metrics:
-                self._set_text(label, '')
-            self._show_metrics(False)
-        else:
-            self._show_metrics(True)
-            rpm = vehicle.rpm
-            self._set_text(self.metric_rpm, f'{rpm:.0f} rpm' if rpm is not None else '--')
-            self._set_text(self.metric_speed, self.settings.format_speed(vehicle.speed_ms))
-            gear = vehicle.gear
-            self._set_text(self.metric_gear,
-                           f'Gear {gear}' if gear and 0 < gear < 11 else '--')
-            boost = vehicle.boost_gauge
-            self._set_text(self.metric_boost,
-                           self.settings.format_pressure(boost)
-                           if boost is not None else '--')
-
         current = self.stack.currentIndex()
         for module in self.registry:
             if not (self._pages.get(module.name) == current or module.always_refresh):
@@ -364,7 +384,7 @@ class Shell(QWidget):
                 continue
 
     def _enable_dark_titlebar(self) -> None:
-        if sys.platform != 'win32':
+        if sys.platform != "win32":
             return
         try:
             handle = int(self.winId())
@@ -372,30 +392,32 @@ class Shell(QWidget):
             for attribute in (20, 19):
                 try:
                     windll.dwmapi.DwmSetWindowAttribute(
-                        handle, attribute, byref(value), sizeof(value))
+                        handle, attribute, byref(value), sizeof(value)
+                    )
                 except Exception:
                     continue
-            colour = T.BG.lstrip('#')
+            colour = T.BG.lstrip("#")
             packed = c_int(int(colour[4:6] + colour[2:4] + colour[0:2], 16))
             windll.dwmapi.DwmSetWindowAttribute(handle, 35, byref(packed), sizeof(packed))
         except Exception:
             pass
 
-
     def _start_update_check(self) -> None:
         """Ask GitHub for a newer release, quietly, a moment after the window opens."""
-        if not self.settings.get('check_for_updates', True):
+        if not self.settings.get("check_for_updates", True):
             return
         from neptune.core import updater
 
         def landed(status, info):
 
-
             if status != updater.UPDATE_AVAILABLE or info is None:
                 return
-            if info.version == self.settings.get('skip_update_version'):
+            if info.version == self.settings.get("skip_update_version"):
                 return
-            QTimer.singleShot(0, lambda: self._offer_update(info))
+            # `landed` runs on the update-check's worker thread (see check_async's
+            # docstring). QTimer.singleShot() from there never fires: it has no Qt event
+            # loop to schedule on. update_available queues onto the GUI thread instead.
+            self.update_available.emit(info)
 
         updater.check_async(landed)
 
@@ -405,89 +427,79 @@ class Shell(QWidget):
         from neptune import __version__
         from neptune.core import updater
 
-        notes = (info.notes or '').strip()
+        notes = (info.notes or "").strip()
         if len(notes) > 700:
-            notes = notes[:700].rstrip() + '…'
+            notes = notes[:700].rstrip() + "…"
 
         box = QMessageBox(self)
-        box.setWindowTitle('Update available')
+        box.setWindowTitle("Update available")
         box.setIcon(QMessageBox.Information)
-        box.setText(f'Neptune {info.version} is available.')
+        box.setText(f"Neptune {info.version} is available.")
         box.setInformativeText(
-            f'You are running {__version__}.\n\n'
-            + (notes if notes else 'Would you like to update now?'))
-        install = box.addButton('Update now', QMessageBox.AcceptRole)
-        box.addButton('Not now', QMessageBox.RejectRole)
-        skip = box.addButton('Skip this version', QMessageBox.DestructiveRole)
+            f"You are running {__version__}.\n\n"
+            + (notes if notes else "Would you like to update now?")
+        )
+        install = box.addButton("Update now", QMessageBox.AcceptRole)
+        box.addButton("Not now", QMessageBox.RejectRole)
+        skip = box.addButton("Skip this version", QMessageBox.DestructiveRole)
         box.exec()
 
         clicked = box.clickedButton()
         if clicked is skip:
-
-            self.settings.set('skip_update_version', info.version)
+            self.settings.set("skip_update_version", info.version)
             return
         if clicked is not install:
             return
 
         if not updater.frozen():
-
             QMessageBox.information(
-                self, 'Update',
-                'Neptune is running from source, so it cannot replace itself.\n'
-                'The releases page has been opened in your browser.')
+                self,
+                "Update",
+                "Neptune is running from source, so it cannot replace itself.\n"
+                "The releases page has been opened in your browser.",
+            )
             updater.open_releases_page()
             return
 
         if updater.download_and_apply(info):
             QMessageBox.information(
-                self, 'Update',
-                'Neptune will close and reopen on the new version.')
+                self, "Update", "Neptune will close and reopen on the new version."
+            )
             self.close()
         else:
             QMessageBox.warning(
-                self, 'Update',
-                'The update could not be installed automatically.\n'
-                'The releases page has been opened so you can download it.')
+                self,
+                "Update",
+                "The update could not be installed automatically.\n"
+                "The releases page has been opened so you can download it.",
+            )
             updater.open_releases_page()
 
-    def showEvent(self, event) -> None:
-        """Ease the window in on first paint.
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_overlay"):
+            self._overlay.setGeometry(self.rect())
 
-        ⚠️ Degrades to a plain, FULLY VISIBLE window if the animation cannot run — never leave the
-        shell stuck transparent. The fade is armed once and only on the first show, so restoring
-        from the taskbar does not replay it.
-        """
+    def showEvent(self, event) -> None:
         super().showEvent(event)
-        if getattr(self, '_faded', False):
+        self.repaint()
+        if getattr(self, "_faded", False):
             return
         self._faded = True
-        try:
-            from PySide6.QtCore import QEasingCurve, QPropertyAnimation
-            self.setWindowOpacity(0.0)
-            fade = QPropertyAnimation(self, b'windowOpacity', self)
-            fade.setDuration(260)
-            fade.setStartValue(0.0)
-            fade.setEndValue(1.0)
-            fade.setEasingCurve(QEasingCurve.OutCubic)
-            fade.finished.connect(lambda: self.setWindowOpacity(1.0))
-            self._fade = fade
-            fade.start()
-        except Exception:
-            self.setWindowOpacity(1.0)
-
+        QTimer.singleShot(0, self._enable_dark_titlebar)
 
         QTimer.singleShot(1500, self._start_update_check)
 
     def closeEvent(self, event) -> None:
         self._timer.stop()
         try:
-            if self.settings.get('restore_on_exit'):
+            if self.settings.get("restore_on_exit"):
                 self.runtime.restore_all()
             self.runtime.detach()
         except Exception:
             pass
         try:
-            self.registry.dispatch('shutdown')
+            self.registry.dispatch("shutdown")
         except Exception:
             pass
         event.accept()
