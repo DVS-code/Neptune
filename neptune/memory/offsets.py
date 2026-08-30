@@ -38,7 +38,7 @@ def boost_to_gauge(raw: float) -> float:
 
 
 class Chain:
-    CTX = 0xA894868
+    CTX = 0xA8CFEB8
     CTX_SIG = "06 E8 ? ? ? ? 90 48 8D 4D C0 E8 ? ? ? ? 48 8B 15 ? ? ? ? 48 8B 82 A8 07 00 00"
     CTX_SIG_INSN = 16
     CTX_SIG_DISP = CTX_SIG_INSN + 3
@@ -126,6 +126,42 @@ class Wheels:
     @classmethod
     def addr(cls, car: int, wheel: int, field: int) -> int:
         return car + cls.BASE + wheel * cls.STRIDE + field
+
+
+class CamberTable:
+    """Per-axle suspension-kinematics table baked when a tuning setup is applied.
+
+    `Wheels.CAMBER_SIN`/`CAMBER_COS` is a LIVE value the physics recomputes every
+    tick by interpolating through this table against wheel travel — writing it
+    directly gets overwritten almost immediately. This table is what the physics
+    interpolates FROM, so writing it once (like a tuning-menu change would) sticks.
+
+    Reached as wheel_base + PTR -> axle object + SUB -> the table itself. The front
+    axle's two wheels (FL/FR) share one table object; the rear axle's (RR/RL) share
+    another. Each table embeds TWO separate curves: the axle's left wheel reads
+    entries starting at HEADER (+0x20), the right wheel reads a second, independent
+    set of entries starting at SUB_B (+0xD40) — confirmed by decompiling the
+    interpolation call site (the mirror argument is hardcoded there, not per-wheel)
+    and by writing each region live and checking exactly one wheel moved, for both
+    axles. Each of the ENTRY_COUNT entries is a 112-byte kinematic pose;
+    CAMBER_SIN/CAMBER_COS within it is the same half-angle (sin, cos) pair as
+    Wheels.CAMBER_SIN/CAMBER_COS, in both regions.
+    """
+
+    PTR = 0x408
+    SUB = 0x30
+    HEADER = 0x20
+    SUB_B = 0xD40
+    # Per Wheels.ORDER ('FL','FR','RR','RL'): the axle's left wheel (FL/RL) owns
+    # HEADER, the right wheel (FR/RR) owns SUB_B, within the same shared table.
+    # The right wheel reads with the opposite sign for the same physical lean
+    # (confirmed against the game's own stock values) — callers wanting one
+    # symmetric value per axle must mirror it themselves before writing.
+    REGION = (HEADER, SUB_B, SUB_B, HEADER)
+    ENTRY_SIZE = 112
+    ENTRY_COUNT = 30
+    CAMBER_SIN = 0x18
+    CAMBER_COS = 0x1C
 
 
 class CarConfig:

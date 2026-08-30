@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import time
 
+from PySide6.QtWidgets import QVBoxLayout, QWidget
+
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
@@ -40,7 +42,12 @@ WHEEL_COUNT = 4
 
 SEQUENCE_LABELS = {"together": "Together", "front": "Front first", "rear": "Rear first"}
 
+CAMBER_MIN_DEG = -20.0
+CAMBER_MAX_DEG = 20.0
+
 HINT_AXLE = "Raises or lowers this axle, as a share of normal ride height."
+HINT_CAMBER = "Static camber, per wheel — each corner is independent."
+HINT_CAMBER_MIRROR = "One value per axle instead of four — the right wheel mirrors the left."
 HINT_DROP = "How far air ride drops the car."
 HINT_FLOOR = "The lowest the car may ever sit. Raise it if the car scrapes or bounces."
 HINT_RAMP = "How long the car takes to move between heights."
@@ -75,6 +82,10 @@ class SuspensionModule(FeatureModule):
         self._radii: list[float] | None = None
         self._front_percent = 0.0
         self._rear_percent = 0.0
+
+        self.stock_camber: list[float] | None = None
+        self._camber: list[float | None] = [None, None, None, None]  # FL, FR, RR, RL
+        self._camber_mirror = True
         self._drop_percent = DROP_PERCENT_DEFAULT
         self._floor_percent = DEFAULT_FLOOR_PERCENT
         self._ramp_seconds = DEFAULT_RAMP_SECONDS
@@ -115,6 +126,12 @@ class SuspensionModule(FeatureModule):
             self._maybach.set_volume(self.settings.get("maybach_volume"))
 
     def _sync_controls(self) -> None:
+        stock = self.stock_camber
+        camber_keys = ("camber_fl", "camber_fr", "camber_rr", "camber_rl")
+        camber_values = [
+            self._camber[i] if self._camber[i] is not None else (stock[i] if stock else None)
+            for i in range(4)
+        ]
         for key, value in (
             ("front", self._front_percent),
             ("rear", self._rear_percent),
@@ -124,17 +141,30 @@ class SuspensionModule(FeatureModule):
             ("bounce_low", self._bounce_low),
             ("bounce_high", self._bounce_high),
             ("bounce_speed", self._bounce_speed),
+            *zip(camber_keys, camber_values, strict=True),
+            ("camber_axle_front", camber_values[0]),
+            ("camber_axle_rear", camber_values[3]),
         ):
             slider = self._widgets.get(key)
-            if slider is not None:
+            if slider is not None and value is not None:
                 slider.set_value(value)
-        for key, state in (("bounce", self._bounce), ("bounce_audio", self._bounce_audio)):
+        for key, state in (
+            ("bounce", self._bounce),
+            ("bounce_audio", self._bounce_audio),
+            ("camber_mirror", self._camber_mirror),
+        ):
             row = self._widgets.get(key)
             if row is not None:
                 try:
                     row.toggle.set_value(bool(state))
                 except Exception:
                     pass
+        wheels_panel = self._widgets.get("camber_wheels_panel")
+        if wheels_panel is not None:
+            wheels_panel.setVisible(not self._camber_mirror)
+        axle_panel = self._widgets.get("camber_axle_panel")
+        if axle_panel is not None:
+            axle_panel.setVisible(self._camber_mirror)
         selector = self._widgets.get("sequence")
         if selector is not None:
             selector.set_value(SEQUENCE_LABELS[self._sequence])
@@ -154,6 +184,8 @@ class SuspensionModule(FeatureModule):
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
         self._capture_stock(vehicle)
+        self._capture_camber_stock(vehicle)
+        self._controls_dirty = True
 
     def _capture_stock(self, vehicle) -> None:
         if self._lowered or self._ramping or self._front_percent or self._rear_percent:
@@ -171,6 +203,14 @@ class SuspensionModule(FeatureModule):
         else:
             self._radii = None
 
+    def _capture_camber_stock(self, vehicle) -> None:
+        if any(value is not None for value in self._camber):
+            return
+        values = vehicle.camber if vehicle else None
+        if not values or any(value is None for value in values):
+            return
+        self.stock_camber = list(values)
+
     def on_car_changed(self, vehicle) -> None:
         self._cancel_ramp()
         self._lowered = False
@@ -178,14 +218,19 @@ class SuspensionModule(FeatureModule):
         self._rear_percent = 0.0
         self.stock = None
         self._radii = None
+        self._camber = [None, None, None, None]
+        self.stock_camber = None
         self._controls_dirty = True
         self.vehicle = vehicle
         self._capture_stock(vehicle)
+        self._capture_camber_stock(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
         if self.stock and (self._lowered or self._front_percent or self._rear_percent):
             self._write(self._target(self._lowered))
+        if any(value is not None for value in self._camber):
+            self._write_camber()
 
     def on_detach(self) -> None:
 
@@ -210,9 +255,15 @@ class SuspensionModule(FeatureModule):
                 vehicle.set_ride_height(self.stock)
             except Exception:
                 pass
+        if vehicle is not None and self.stock_camber:
+            try:
+                vehicle.set_camber(self.stock_camber)
+            except Exception:
+                pass
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
+        self._camber = [None, None, None, None]
         self._controls_dirty = True
 
     def reset_controls(self) -> None:
@@ -221,15 +272,19 @@ class SuspensionModule(FeatureModule):
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
+        self._camber = [None, None, None, None]
         self._controls_dirty = True
 
     def tick(self, vehicle) -> None:
         self.vehicle = vehicle
         if self.stock is None:
             self._capture_stock(vehicle)
+        if self.stock_camber is None:
+            self._capture_camber_stock(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
         self._reapply_if_rebaked(vehicle)
+        self._reapply_camber_if_rebaked(vehicle)
 
     def _reapply_if_rebaked(self, vehicle) -> None:
         """Re-apply ride height when the game has quietly put stock height back."""
@@ -243,6 +298,19 @@ class SuspensionModule(FeatureModule):
             return
         if any(abs(a - b) > 1e-3 for a, b in zip(current, expected, strict=True)):
             self._write(expected)
+
+    def _reapply_camber_if_rebaked(self, vehicle) -> None:
+        """Re-apply camber when the game has quietly rebaked the axle's table."""
+        if not any(value is not None for value in self._camber):
+            return
+        current = vehicle.camber if vehicle else None
+        if not current or len(current) != len(self._camber):
+            return
+        if any(
+            target is not None and abs(actual - target) > 0.05
+            for target, actual in zip(self._camber, current, strict=True)
+        ):
+            self._write_camber()
 
     @property
     def _ramping(self) -> bool:
@@ -311,6 +379,54 @@ class SuspensionModule(FeatureModule):
         if vehicle is None or not values or any(value is None for value in values):
             return False
         return bool(vehicle.set_ride_height(values))
+
+    def _write_camber(self) -> bool:
+        """Write held per-wheel camber. O.Wheels.ORDER is (FL, FR, RR, RL);
+        vehicle.set_camber() takes one verbatim value per wheel, so each
+        corner is independent here, no axle mirroring.
+        """
+        vehicle = self.vehicle
+        if vehicle is None:
+            return False
+        return bool(vehicle.set_camber(self._camber))
+
+    def _set_camber(self, wheel: int, value: float) -> None:
+        self._camber[wheel] = float(value)
+        self._write_camber()
+
+    def _set_camber_axle(self, axle: str, value: float) -> None:
+        """Mirror-mode entry point: one value per axle, right wheel negated."""
+        value = float(value)
+        if axle == "front":
+            self._camber[0], self._camber[1] = value, -value
+        else:
+            self._camber[3], self._camber[2] = value, -value
+        self._write_camber()
+
+    def _set_camber_mirror(self, enabled: bool) -> None:
+        self._camber_mirror = bool(enabled)
+        # Also resyncs every slider (not just panel visibility) so the axle sliders
+        # don't show a stale value left over from before an asymmetric per-wheel edit.
+        self._sync_controls()
+
+    def _reset_camber(self) -> None:
+        stock = self.stock_camber
+        self._camber = list(stock) if stock else [None, None, None, None]
+        for key, value in zip(
+            ("camber_fl", "camber_fr", "camber_rr", "camber_rl"), self._camber, strict=True
+        ):
+            slider = self._widgets.get(key)
+            if slider is not None and value is not None:
+                slider.set_value(value)
+        for key, value in (
+            ("camber_axle_front", self._camber[0]),
+            ("camber_axle_rear", self._camber[3]),
+        ):
+            slider = self._widgets.get(key)
+            if slider is not None and value is not None:
+                slider.set_value(value)
+        self._write_camber()
+        self._camber = [None, None, None, None]
 
     def toggle(self) -> None:
         if not self.stock or self.vehicle is None:
@@ -535,6 +651,71 @@ class SuspensionModule(FeatureModule):
         reset_button.clicked.connect(self._reset_height)
         height_card.add(reset_button)
 
+        camber_card = page.add_card("Camber", HINT_CAMBER)
+
+        camber_mirror = ToggleRow("Mirror axles", self._camber_mirror, hint=HINT_CAMBER_MIRROR)
+        camber_mirror.toggle.toggled_value.connect(self._set_camber_mirror)
+        self._widgets["camber_mirror"] = camber_mirror
+        camber_card.add(camber_mirror)
+
+        stock_camber = self.stock_camber
+
+        wheels_panel = QWidget()
+        wheels_panel.setVisible(not self._camber_mirror)
+        wheels_layout = QVBoxLayout(wheels_panel)
+        wheels_layout.setContentsMargins(0, 0, 0, 0)
+        wheels_layout.setSpacing(12)
+        for wheel, (key, label) in enumerate(
+            (
+                ("camber_fl", "Front Left"),
+                ("camber_fr", "Front Right"),
+                ("camber_rr", "Rear Right"),
+                ("camber_rl", "Rear Left"),
+            )
+        ):
+            camber_slider = SliderRow(
+                label,
+                CAMBER_MIN_DEG,
+                CAMBER_MAX_DEG,
+                stock_camber[wheel] if stock_camber else 0.0,
+                step=0.1,
+                decimals=1,
+                unit="°",
+            )
+            camber_slider.changed.connect(lambda value, w=wheel: self._set_camber(w, value))
+            self._widgets[key] = camber_slider
+            wheels_layout.addWidget(camber_slider)
+        self._widgets["camber_wheels_panel"] = wheels_panel
+        camber_card.add(wheels_panel)
+
+        axle_panel = QWidget()
+        axle_panel.setVisible(self._camber_mirror)
+        axle_layout = QVBoxLayout(axle_panel)
+        axle_layout.setContentsMargins(0, 0, 0, 0)
+        axle_layout.setSpacing(12)
+        for key, axle, label in (
+            ("camber_axle_front", "front", "Front"),
+            ("camber_axle_rear", "rear", "Rear"),
+        ):
+            axle_slider = SliderRow(
+                label,
+                CAMBER_MIN_DEG,
+                CAMBER_MAX_DEG,
+                stock_camber[0 if axle == "front" else 3] if stock_camber else 0.0,
+                step=0.1,
+                decimals=1,
+                unit="°",
+            )
+            axle_slider.changed.connect(lambda value, a=axle: self._set_camber_axle(a, value))
+            self._widgets[key] = axle_slider
+            axle_layout.addWidget(axle_slider)
+        self._widgets["camber_axle_panel"] = axle_panel
+        camber_card.add(axle_panel)
+
+        camber_reset_button = Button("Reset to stock camber")
+        camber_reset_button.clicked.connect(self._reset_camber)
+        camber_card.add(camber_reset_button)
+
         air_card = page.add_card("Air ride", "Drops the car on a key press.")
 
         toggle_button = PrimaryButton("Drop or lift now")
@@ -655,6 +836,10 @@ class SuspensionModule(FeatureModule):
         stats.add("state", "State", "Stock")
         stats.add("front", "Front", "--")
         stats.add("rear", "Rear", "--")
+        stats.add("camber_fl_live", "Camber Front Left", "--")
+        stats.add("camber_fr_live", "Camber Front Right", "--")
+        stats.add("camber_rr_live", "Camber Rear Right", "--")
+        stats.add("camber_rl_live", "Camber Rear Left", "--")
         self._widgets["stats"] = stats
         live_card.add(stats)
 
@@ -685,6 +870,15 @@ class SuspensionModule(FeatureModule):
         stats.set("front", _axle_text(self.settings, current[0], current[1]), unit="")
         stats.set("rear", _axle_text(self.settings, current[2], current[3]), unit="")
 
+        camber = vehicle.camber
+        if camber:
+            for key, value in zip(
+                ("camber_fl_live", "camber_fr_live", "camber_rr_live", "camber_rl_live"),
+                camber,
+                strict=True,
+            ):
+                stats.set(key, f"{value:.2f}", unit="°")
+
     def save_state(self) -> dict:
         return {
             "units": "percent",
@@ -698,6 +892,11 @@ class SuspensionModule(FeatureModule):
             "bounce_high": self._bounce_high,
             "bounce_speed": self._bounce_speed,
             "bounce_audio": self._bounce_audio,
+            "camber_fl": self._camber[0],
+            "camber_fr": self._camber[1],
+            "camber_rr": self._camber[2],
+            "camber_rl": self._camber[3],
+            "camber_mirror": self._camber_mirror,
         }
 
     def load_state(self, data: dict) -> None:
@@ -747,5 +946,17 @@ class SuspensionModule(FeatureModule):
             "bounce_speed", BOUNCE_DEFAULT_SPEED, BOUNCE_SPEED_MIN, BOUNCE_SPEED_MAX
         )
         self._bounce_audio = bool(data.get("bounce_audio", True))
+
+        self._camber = [
+            (
+                _number(key, 0.0, CAMBER_MIN_DEG, CAMBER_MAX_DEG)
+                if data.get(key) is not None
+                else None
+            )
+            for key in ("camber_fl", "camber_fr", "camber_rr", "camber_rl")
+        ]
+        self._camber_mirror = bool(data.get("camber_mirror", True))
+        if any(value is not None for value in self._camber):
+            self._write_camber()
 
         self._controls_dirty = True
