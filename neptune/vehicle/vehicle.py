@@ -273,6 +273,35 @@ class Vehicle:
             values.append(2.0 * math.degrees(math.atan2(sin, cos)))
         return values
 
+    def _camber_table(self, wheel: int) -> int | None:
+        """This wheel's axle camber-kinematics table address (see offsets.CamberTable)."""
+        T = O.CamberTable
+        axle = self.process.pointer(O.Wheels.addr(self.car, wheel, 0) + T.PTR)
+        return self.process.pointer(axle + T.SUB) if axle else None
+
+    def set_camber(self, values) -> bool:
+        """Bake per-wheel static camber, in degrees, into the axle's kinematics table."""
+        T = O.CamberTable
+        ok = True
+        written: set[tuple[int, int]] = set()
+        for wheel, degrees in enumerate(values[: O.Wheels.COUNT]):
+            if degrees is None:
+                continue
+            table = self._camber_table(wheel)
+            if not table:
+                continue
+            region = T.REGION[wheel]
+            key = (table, region)
+            if key in written:
+                continue
+            written.add(key)
+            half = math.radians(float(degrees)) / 2.0
+            pair = (math.sin(half), math.cos(half))
+            for i in range(T.ENTRY_COUNT):
+                entry = table + region + i * T.ENTRY_SIZE
+                ok = self.process.set_f32_array(entry + T.CAMBER_SIN, pair) and ok
+        return bool(written) and ok
+
     @property
     def wheel_radius(self) -> list[float] | None:
         """Per-wheel radius in metres. Constant for a given car and tyre fitment."""
