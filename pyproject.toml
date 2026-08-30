@@ -1,6 +1,6 @@
 [project]
 name = "neptune"
-version = "1.0.3"
+version = "1.1.0"
 description = "A live tuning tool for Forza Horizon 6 on PC"
 readme = "README.md"
 requires-python = ">=3.11"
