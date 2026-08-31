@@ -45,9 +45,14 @@ SEQUENCE_LABELS = {"together": "Together", "front": "Front first", "rear": "Rear
 CAMBER_MIN_DEG = -20.0
 CAMBER_MAX_DEG = 20.0
 
+TRACK_MIN_MM = -150.0
+TRACK_MAX_MM = 150.0
+
 HINT_AXLE = "Raises or lowers this axle, as a share of normal ride height."
 HINT_CAMBER = "Static camber, per wheel — each corner is independent."
 HINT_CAMBER_MIRROR = "One value per axle instead of four — the right wheel mirrors the left."
+HINT_TRACK = "Track width, per wheel — how far outward each corner sits."
+HINT_TRACK_MIRROR = "One value per axle instead of four — both wheels move together."
 HINT_DROP = "How far air ride drops the car."
 HINT_FLOOR = "The lowest the car may ever sit. Raise it if the car scrapes or bounces."
 HINT_RAMP = "How long the car takes to move between heights."
@@ -86,6 +91,10 @@ class SuspensionModule(FeatureModule):
         self.stock_camber: list[float] | None = None
         self._camber: list[float | None] = [None, None, None, None]  # FL, FR, RR, RL
         self._camber_mirror = True
+
+        self.stock_track: list[list[float] | None] = [None, None, None, None]  # 30-pt curve/wheel
+        self._track: list[float | None] = [None, None, None, None]  # held delta, mm, FL/FR/RR/RL
+        self._track_mirror = True
         self._drop_percent = DROP_PERCENT_DEFAULT
         self._floor_percent = DEFAULT_FLOOR_PERCENT
         self._ramp_seconds = DEFAULT_RAMP_SECONDS
@@ -132,6 +141,8 @@ class SuspensionModule(FeatureModule):
             self._camber[i] if self._camber[i] is not None else (stock[i] if stock else None)
             for i in range(4)
         ]
+        track_keys = ("track_fl", "track_fr", "track_rr", "track_rl")
+        track_values = [value if value is not None else 0.0 for value in self._track]
         for key, value in (
             ("front", self._front_percent),
             ("rear", self._rear_percent),
@@ -144,6 +155,9 @@ class SuspensionModule(FeatureModule):
             *zip(camber_keys, camber_values, strict=True),
             ("camber_axle_front", camber_values[0]),
             ("camber_axle_rear", camber_values[3]),
+            *zip(track_keys, track_values, strict=True),
+            ("track_axle_front", track_values[0]),
+            ("track_axle_rear", track_values[3]),
         ):
             slider = self._widgets.get(key)
             if slider is not None and value is not None:
@@ -152,6 +166,7 @@ class SuspensionModule(FeatureModule):
             ("bounce", self._bounce),
             ("bounce_audio", self._bounce_audio),
             ("camber_mirror", self._camber_mirror),
+            ("track_mirror", self._track_mirror),
         ):
             row = self._widgets.get(key)
             if row is not None:
@@ -165,6 +180,12 @@ class SuspensionModule(FeatureModule):
         axle_panel = self._widgets.get("camber_axle_panel")
         if axle_panel is not None:
             axle_panel.setVisible(self._camber_mirror)
+        track_wheels_panel = self._widgets.get("track_wheels_panel")
+        if track_wheels_panel is not None:
+            track_wheels_panel.setVisible(not self._track_mirror)
+        track_axle_panel = self._widgets.get("track_axle_panel")
+        if track_axle_panel is not None:
+            track_axle_panel.setVisible(self._track_mirror)
         selector = self._widgets.get("sequence")
         if selector is not None:
             selector.set_value(SEQUENCE_LABELS[self._sequence])
@@ -185,6 +206,7 @@ class SuspensionModule(FeatureModule):
         self.vehicle = vehicle
         self._capture_stock(vehicle)
         self._capture_camber_stock(vehicle)
+        self._capture_track_stock(vehicle)
         self._controls_dirty = True
 
     def _capture_stock(self, vehicle) -> None:
@@ -211,6 +233,16 @@ class SuspensionModule(FeatureModule):
             return
         self.stock_camber = list(values)
 
+    def _capture_track_stock(self, vehicle) -> None:
+        if any(value is not None for value in self._track):
+            return
+        if not vehicle:
+            return
+        curves = [vehicle.track_curve(wheel) for wheel in range(WHEEL_COUNT)]
+        if any(curve is None for curve in curves):
+            return
+        self.stock_track = curves
+
     def on_car_changed(self, vehicle) -> None:
         self._cancel_ramp()
         self._lowered = False
@@ -220,10 +252,13 @@ class SuspensionModule(FeatureModule):
         self._radii = None
         self._camber = [None, None, None, None]
         self.stock_camber = None
+        self._track = [None, None, None, None]
+        self.stock_track = [None, None, None, None]
         self._controls_dirty = True
         self.vehicle = vehicle
         self._capture_stock(vehicle)
         self._capture_camber_stock(vehicle)
+        self._capture_track_stock(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -231,6 +266,8 @@ class SuspensionModule(FeatureModule):
             self._write(self._target(self._lowered))
         if any(value is not None for value in self._camber):
             self._write_camber()
+        if any(value is not None for value in self._track):
+            self._write_track()
 
     def on_detach(self) -> None:
 
@@ -260,10 +297,17 @@ class SuspensionModule(FeatureModule):
                 vehicle.set_camber(self.stock_camber)
             except Exception:
                 pass
+        if vehicle is not None and all(curve is not None for curve in self.stock_track):
+            try:
+                for wheel in range(WHEEL_COUNT):
+                    vehicle.set_track_width(wheel, self.stock_track[wheel], 0.0)
+            except Exception:
+                pass
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
         self._camber = [None, None, None, None]
+        self._track = [None, None, None, None]
         self._controls_dirty = True
 
     def reset_controls(self) -> None:
@@ -273,6 +317,7 @@ class SuspensionModule(FeatureModule):
         self._front_percent = 0.0
         self._rear_percent = 0.0
         self._camber = [None, None, None, None]
+        self._track = [None, None, None, None]
         self._controls_dirty = True
 
     def tick(self, vehicle) -> None:
@@ -281,10 +326,13 @@ class SuspensionModule(FeatureModule):
             self._capture_stock(vehicle)
         if self.stock_camber is None:
             self._capture_camber_stock(vehicle)
+        if any(curve is None for curve in self.stock_track):
+            self._capture_track_stock(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
         self._reapply_if_rebaked(vehicle)
         self._reapply_camber_if_rebaked(vehicle)
+        self._reapply_track_if_rebaked(vehicle)
 
     def _reapply_if_rebaked(self, vehicle) -> None:
         """Re-apply ride height when the game has quietly put stock height back."""
@@ -311,6 +359,20 @@ class SuspensionModule(FeatureModule):
             for target, actual in zip(self._camber, current, strict=True)
         ):
             self._write_camber()
+
+    def _reapply_track_if_rebaked(self, vehicle) -> None:
+        """Re-apply track width when the game has quietly rebaked the axle's table."""
+        if vehicle is None or not any(value is not None for value in self._track):
+            return
+        for wheel, delta_mm in enumerate(self._track):
+            if delta_mm is None:
+                continue
+            baseline = self.stock_track[wheel]
+            if baseline is None:
+                continue
+            if vehicle.track_width_ok(wheel, baseline, delta_mm / 1000.0) is False:
+                self._write_track()
+                return
 
     @property
     def _ramping(self) -> bool:
@@ -427,6 +489,55 @@ class SuspensionModule(FeatureModule):
                 slider.set_value(value)
         self._write_camber()
         self._camber = [None, None, None, None]
+
+    def _write_track(self) -> bool:
+        """Write held per-wheel track-width delta. vehicle.set_track_width() takes a
+        delta in metres against each wheel's stock curve, so a None entry leaves
+        that wheel untouched and repeating the same call doesn't shift it further.
+        """
+        vehicle = self.vehicle
+        if vehicle is None:
+            return False
+        ok = True
+        wrote = False
+        for wheel, delta_mm in enumerate(self._track):
+            if delta_mm is None:
+                continue
+            baseline = self.stock_track[wheel]
+            if baseline is None:
+                continue
+            wrote = True
+            ok = vehicle.set_track_width(wheel, baseline, delta_mm / 1000.0) and ok
+        return wrote and ok
+
+    def _set_track(self, wheel: int, value_mm: float) -> None:
+        self._track[wheel] = float(value_mm)
+        self._write_track()
+
+    def _set_track_axle(self, axle: str, value_mm: float) -> None:
+        """Mirror-mode entry point: one value per axle, both wheels move together."""
+        value_mm = float(value_mm)
+        if axle == "front":
+            self._track[0] = self._track[1] = value_mm
+        else:
+            self._track[3] = self._track[2] = value_mm
+        self._write_track()
+
+    def _set_track_mirror(self, enabled: bool) -> None:
+        self._track_mirror = bool(enabled)
+        self._sync_controls()
+
+    def _reset_track(self) -> None:
+        vehicle = self.vehicle
+        if vehicle is not None and all(curve is not None for curve in self.stock_track):
+            for wheel, curve in enumerate(self.stock_track):
+                vehicle.set_track_width(wheel, curve, 0.0)
+        for key in ("track_fl", "track_fr", "track_rr", "track_rl",
+                    "track_axle_front", "track_axle_rear"):
+            slider = self._widgets.get(key)
+            if slider is not None:
+                slider.set_value(0.0)
+        self._track = [None, None, None, None]
 
     def toggle(self) -> None:
         if not self.stock or self.vehicle is None:
@@ -716,6 +827,69 @@ class SuspensionModule(FeatureModule):
         camber_reset_button.clicked.connect(self._reset_camber)
         camber_card.add(camber_reset_button)
 
+        track_card = page.add_card("Track Width", HINT_TRACK)
+
+        track_mirror = ToggleRow("Mirror axles", self._track_mirror, hint=HINT_TRACK_MIRROR)
+        track_mirror.toggle.toggled_value.connect(self._set_track_mirror)
+        self._widgets["track_mirror"] = track_mirror
+        track_card.add(track_mirror)
+
+        track_wheels_panel = QWidget()
+        track_wheels_panel.setVisible(not self._track_mirror)
+        track_wheels_layout = QVBoxLayout(track_wheels_panel)
+        track_wheels_layout.setContentsMargins(0, 0, 0, 0)
+        track_wheels_layout.setSpacing(12)
+        for wheel, (key, label) in enumerate(
+            (
+                ("track_fl", "Front Left"),
+                ("track_fr", "Front Right"),
+                ("track_rr", "Rear Right"),
+                ("track_rl", "Rear Left"),
+            )
+        ):
+            track_slider = SliderRow(
+                label,
+                TRACK_MIN_MM,
+                TRACK_MAX_MM,
+                0.0,
+                step=1,
+                decimals=0,
+                unit="mm",
+            )
+            track_slider.changed.connect(lambda value, w=wheel: self._set_track(w, value))
+            self._widgets[key] = track_slider
+            track_wheels_layout.addWidget(track_slider)
+        self._widgets["track_wheels_panel"] = track_wheels_panel
+        track_card.add(track_wheels_panel)
+
+        track_axle_panel = QWidget()
+        track_axle_panel.setVisible(self._track_mirror)
+        track_axle_layout = QVBoxLayout(track_axle_panel)
+        track_axle_layout.setContentsMargins(0, 0, 0, 0)
+        track_axle_layout.setSpacing(12)
+        for key, axle, label in (
+            ("track_axle_front", "front", "Front"),
+            ("track_axle_rear", "rear", "Rear"),
+        ):
+            track_axle_slider = SliderRow(
+                label,
+                TRACK_MIN_MM,
+                TRACK_MAX_MM,
+                0.0,
+                step=1,
+                decimals=0,
+                unit="mm",
+            )
+            track_axle_slider.changed.connect(lambda value, a=axle: self._set_track_axle(a, value))
+            self._widgets[key] = track_axle_slider
+            track_axle_layout.addWidget(track_axle_slider)
+        self._widgets["track_axle_panel"] = track_axle_panel
+        track_card.add(track_axle_panel)
+
+        track_reset_button = Button("Reset to stock track width")
+        track_reset_button.clicked.connect(self._reset_track)
+        track_card.add(track_reset_button)
+
         air_card = page.add_card("Air ride", "Drops the car on a key press.")
 
         toggle_button = PrimaryButton("Drop or lift now")
@@ -897,6 +1071,11 @@ class SuspensionModule(FeatureModule):
             "camber_rr": self._camber[2],
             "camber_rl": self._camber[3],
             "camber_mirror": self._camber_mirror,
+            "track_fl": self._track[0],
+            "track_fr": self._track[1],
+            "track_rr": self._track[2],
+            "track_rl": self._track[3],
+            "track_mirror": self._track_mirror,
         }
 
     def load_state(self, data: dict) -> None:
@@ -958,5 +1137,17 @@ class SuspensionModule(FeatureModule):
         self._camber_mirror = bool(data.get("camber_mirror", True))
         if any(value is not None for value in self._camber):
             self._write_camber()
+
+        self._track = [
+            (
+                _number(key, 0.0, TRACK_MIN_MM, TRACK_MAX_MM)
+                if data.get(key) is not None
+                else None
+            )
+            for key in ("track_fl", "track_fr", "track_rr", "track_rl")
+        ]
+        self._track_mirror = bool(data.get("track_mirror", True))
+        if any(value is not None for value in self._track):
+            self._write_track()
 
         self._controls_dirty = True
