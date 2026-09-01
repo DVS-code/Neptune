@@ -13,6 +13,12 @@ from neptune.ui import theme as T
 from neptune.ui.widgets.card import FieldRow, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import BindButton, Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
+from neptune.ui.widgets.transitioncurve import (
+    DEFAULT_CURVE,
+    TransitionCurve,
+    curve_value,
+    normalise_curve,
+)
 
 RAMP_HZ = 60
 DEFAULT_RAMP_SECONDS = 2.5
@@ -44,6 +50,9 @@ SEQUENCE_LABELS = {"together": "Together", "front": "Front first", "rear": "Rear
 
 CAMBER_MIN_DEG = -20.0
 CAMBER_MAX_DEG = 20.0
+CAMBER_RAMP_HZ = 20
+CAMBER_AIR_DEFAULT_FRONT = -6.0
+CAMBER_AIR_DEFAULT_REAR = -6.0
 
 TRACK_MIN_MM = -150.0
 TRACK_MAX_MM = 150.0
@@ -54,6 +63,13 @@ HINT_CAMBER_MIRROR = "One value per axle instead of four — the right wheel mir
 HINT_TRACK = "Track width, per wheel — how far outward each corner sits."
 HINT_TRACK_MIRROR = "One value per axle instead of four — both wheels move together."
 HINT_DROP = "How far air ride drops the car."
+HINT_AIR_CAMBER = (
+    "Moves camber from the values above to the lowered values whenever air ride drops."
+)
+HINT_CAMBER_CURVE = (
+    "Shapes the camber animation. Drag the middle points: left-to-right is time and "
+    "bottom-to-top is progress toward the lowered angle."
+)
 HINT_FLOOR = "The lowest the car may ever sit. Raise it if the car scrapes or bounces."
 HINT_RAMP = "How long the car takes to move between heights."
 HINT_SEQUENCE = "The order the axles move in. The raise plays the same order in reverse."
@@ -91,6 +107,13 @@ class SuspensionModule(FeatureModule):
         self.stock_camber: list[float] | None = None
         self._camber: list[float | None] = [None, None, None, None]  # FL, FR, RR, RL
         self._camber_mirror = True
+        self._air_camber = False
+        self._air_camber_front = CAMBER_AIR_DEFAULT_FRONT
+        self._air_camber_rear = CAMBER_AIR_DEFAULT_REAR
+        self._air_camber_backup: tuple[float, float, list[float | None]] | None = None
+        self._camber_curve = list(DEFAULT_CURVE)
+        self._camber_thread: threading.Thread | None = None
+        self._camber_cancel = threading.Event()
 
         self.stock_track: list[list[float] | None] = [None, None, None, None]  # 30-pt curve/wheel
         self._track: list[float | None] = [None, None, None, None]  # held delta, mm, FL/FR/RR/RL
@@ -152,6 +175,8 @@ class SuspensionModule(FeatureModule):
             ("bounce_low", self._bounce_low),
             ("bounce_high", self._bounce_high),
             ("bounce_speed", self._bounce_speed),
+            ("air_camber_front", self._air_camber_front),
+            ("air_camber_rear", self._air_camber_rear),
             *zip(camber_keys, camber_values, strict=True),
             ("camber_axle_front", camber_values[0]),
             ("camber_axle_rear", camber_values[3]),
@@ -167,6 +192,7 @@ class SuspensionModule(FeatureModule):
             ("bounce_audio", self._bounce_audio),
             ("camber_mirror", self._camber_mirror),
             ("track_mirror", self._track_mirror),
+            ("air_camber", self._air_camber),
         ):
             row = self._widgets.get(key)
             if row is not None:
@@ -189,6 +215,13 @@ class SuspensionModule(FeatureModule):
         selector = self._widgets.get("sequence")
         if selector is not None:
             selector.set_value(SEQUENCE_LABELS[self._sequence])
+        curve = self._widgets.get("camber_curve")
+        if curve is not None:
+            curve.set_values(self._camber_curve)
+        for card_key in ("height_card", "camber_card"):
+            card = self._widgets.get(card_key)
+            if card is not None:
+                card.setEnabled(not self._air_camber)
 
     def binding(self) -> dict | None:
         return self.settings.binding("suspension.airride")
@@ -234,7 +267,7 @@ class SuspensionModule(FeatureModule):
         self.stock_camber = list(values)
 
     def _capture_track_stock(self, vehicle) -> None:
-        if any(value is not None for value in self._track):
+        if all(curve is not None for curve in self.stock_track):
             return
         if not vehicle:
             return
@@ -245,6 +278,7 @@ class SuspensionModule(FeatureModule):
 
     def on_car_changed(self, vehicle) -> None:
         self._cancel_ramp()
+        self._cancel_camber_ramp()
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
@@ -264,8 +298,8 @@ class SuspensionModule(FeatureModule):
         self.vehicle = vehicle
         if self.stock and (self._lowered or self._front_percent or self._rear_percent):
             self._write(self._target(self._lowered))
-        if any(value is not None for value in self._camber):
-            self._write_camber()
+        if any(value is not None for value in self._camber) or self._air_camber:
+            self._write_active_camber()
         if any(value is not None for value in self._track):
             self._write_track()
 
@@ -275,6 +309,7 @@ class SuspensionModule(FeatureModule):
         self._bounce_cancel.set()
         self._maybach.stop()
         self._cancel_ramp()
+        self._cancel_camber_ramp()
         self.vehicle = None
 
     def restore(self) -> None:
@@ -286,6 +321,7 @@ class SuspensionModule(FeatureModule):
             bounce_thread.join(timeout=1.0)
         self._bounce_thread = None
         self._cancel_ramp()
+        self._cancel_camber_ramp()
         vehicle = self.vehicle
         if vehicle is not None and self.stock:
             try:
@@ -307,6 +343,8 @@ class SuspensionModule(FeatureModule):
         self._front_percent = 0.0
         self._rear_percent = 0.0
         self._camber = [None, None, None, None]
+        self._air_camber = False
+        self._air_camber_backup = None
         self._track = [None, None, None, None]
         self._controls_dirty = True
 
@@ -317,6 +355,12 @@ class SuspensionModule(FeatureModule):
         self._front_percent = 0.0
         self._rear_percent = 0.0
         self._camber = [None, None, None, None]
+        self._air_camber = False
+        self._air_camber_front = CAMBER_AIR_DEFAULT_FRONT
+        self._air_camber_rear = CAMBER_AIR_DEFAULT_REAR
+        self._air_camber_backup = None
+        self._camber_curve = list(DEFAULT_CURVE)
+        self._cancel_camber_ramp()
         self._track = [None, None, None, None]
         self._controls_dirty = True
 
@@ -349,16 +393,19 @@ class SuspensionModule(FeatureModule):
 
     def _reapply_camber_if_rebaked(self, vehicle) -> None:
         """Re-apply camber when the game has quietly rebaked the axle's table."""
-        if not any(value is not None for value in self._camber):
+        if self._camber_ramping:
+            return
+        target = self._active_camber_target()
+        if target is None:
             return
         current = vehicle.camber if vehicle else None
-        if not current or len(current) != len(self._camber):
+        if not current or len(current) != len(target):
             return
         if any(
-            target is not None and abs(actual - target) > 0.05
-            for target, actual in zip(self._camber, current, strict=True)
+            expected is not None and abs(actual - expected) > 0.05
+            for expected, actual in zip(target, current, strict=True)
         ):
-            self._write_camber()
+            self._write_camber(target)
 
     def _reapply_track_if_rebaked(self, vehicle) -> None:
         """Re-apply track width when the game has quietly rebaked the axle's table."""
@@ -377,6 +424,11 @@ class SuspensionModule(FeatureModule):
     @property
     def _ramping(self) -> bool:
         thread = self._thread
+        return thread is not None and thread.is_alive()
+
+    @property
+    def _camber_ramping(self) -> bool:
+        thread = self._camber_thread
         return thread is not None and thread.is_alive()
 
     def _clamp(self, value: float, wheel: int = 0) -> float:
@@ -442,7 +494,39 @@ class SuspensionModule(FeatureModule):
             return False
         return bool(vehicle.set_ride_height(values))
 
-    def _write_camber(self) -> bool:
+    def _configured_camber(self) -> list[float | None]:
+        """Raised camber, filling unset corners from the captured stock values."""
+        stock = self.stock_camber or [None] * WHEEL_COUNT
+        return [
+            value if value is not None else stock[index]
+            for index, value in enumerate(self._camber)
+        ]
+
+    def _air_camber_target(self) -> list[float]:
+        """Lowered target in the game's FL, FR, RR, RL wheel order."""
+        return [
+            self._air_camber_front,
+            -self._air_camber_front,
+            -self._air_camber_rear,
+            self._air_camber_rear,
+        ]
+
+    def _active_camber_target(self) -> list[float | None] | None:
+        """The camber `_reapply_camber_if_rebaked` should enforce right now.
+
+        While animating and raised there is nothing to enforce — Camber is reset and
+        greyed out for as long as this runs, so the car is just sitting at stock — and
+        forcing that back every tick would fight the live preview `_set_air_camber_target`
+        writes while dragging the lowered-target sliders.
+        """
+        if self._air_camber and self._lowered:
+            return self._air_camber_target()
+        if any(value is not None for value in self._camber):
+            target = self._configured_camber()
+            return target if any(value is not None for value in target) else None
+        return None
+
+    def _write_camber(self, values=None) -> bool:
         """Write held per-wheel camber. O.Wheels.ORDER is (FL, FR, RR, RL);
         vehicle.set_camber() takes one verbatim value per wheel, so each
         corner is independent here, no axle mirroring.
@@ -450,20 +534,26 @@ class SuspensionModule(FeatureModule):
         vehicle = self.vehicle
         if vehicle is None:
             return False
-        return bool(vehicle.set_camber(self._camber))
+        return bool(vehicle.set_camber(self._camber if values is None else values))
+
+    def _write_active_camber(self) -> bool:
+        target = self._active_camber_target()
+        return self._write_camber(target) if target is not None else False
 
     def _set_camber(self, wheel: int, value: float) -> None:
+        self._cancel_camber_ramp()
         self._camber[wheel] = float(value)
-        self._write_camber()
+        self._write_active_camber()
 
     def _set_camber_axle(self, axle: str, value: float) -> None:
         """Mirror-mode entry point: one value per axle, right wheel negated."""
+        self._cancel_camber_ramp()
         value = float(value)
         if axle == "front":
             self._camber[0], self._camber[1] = value, -value
         else:
             self._camber[3], self._camber[2] = value, -value
-        self._write_camber()
+        self._write_active_camber()
 
     def _set_camber_mirror(self, enabled: bool) -> None:
         self._camber_mirror = bool(enabled)
@@ -471,7 +561,61 @@ class SuspensionModule(FeatureModule):
         # don't show a stale value left over from before an asymmetric per-wheel edit.
         self._sync_controls()
 
+    def _set_air_camber(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._air_camber:
+            return
+        self._cancel_camber_ramp()
+        restore_stock = False
+        if enabled:
+            # Ride height and Camber become the animation's own raised/lowered targets while
+            # this is on, so drop any custom offset back to stock — kept aside to restore
+            # once this is switched off again.
+            self._air_camber_backup = (self._front_percent, self._rear_percent, list(self._camber))
+            self._air_camber = True
+            self._reset_height()
+            self._reset_camber()
+        else:
+            self._air_camber = False
+            backup = self._air_camber_backup
+            self._air_camber_backup = None
+            if backup is not None:
+                self._front_percent, self._rear_percent, self._camber = (
+                    backup[0],
+                    backup[1],
+                    list(backup[2]),
+                )
+                if self.stock and self.vehicle is not None:
+                    self._cancel_ramp()
+                    start = self.vehicle.ride_height or self._target(self._lowered)
+                    self._start_ramp(start, self._target(self._lowered), SETTLE_SECONDS)
+                # No custom camber to restore — the animation may have left the live
+                # camber at the lowered angle, so force it back to stock explicitly
+                # rather than relying on _write_active_camber(), which no-ops when
+                # there's nothing to enforce.
+                restore_stock = not any(value is not None for value in self._camber)
+        if restore_stock and self.stock_camber:
+            self._write_camber(self.stock_camber)
+        else:
+            self._write_active_camber()
+        self._sync_controls()
+
+    def _set_air_camber_target(self, axle: str, value: float) -> None:
+        if axle == "front":
+            self._air_camber_front = float(value)
+        else:
+            self._air_camber_rear = float(value)
+        # Preview the lowered target directly, whether or not the car is actually lowered
+        # right now — every other slider in this app gives immediate feedback, and gating
+        # this on `_lowered` just meant it silently did nothing while raised.
+        if self._air_camber and not self._camber_ramping:
+            self._write_camber(self._air_camber_target())
+
+    def _set_camber_curve(self, values) -> None:
+        self._camber_curve = list(values)
+
     def _reset_camber(self) -> None:
+        self._cancel_camber_ramp()
         stock = self.stock_camber
         self._camber = list(stock) if stock else [None, None, None, None]
         for key, value in zip(
@@ -544,7 +688,9 @@ class SuspensionModule(FeatureModule):
             return
         if self._bounce:
             return
+        start_camber = self.vehicle.camber if self._air_camber else None
         self._cancel_ramp()
+        self._cancel_camber_ramp()
         self._lowered = not self._lowered
 
         if self._lowered:
@@ -553,6 +699,12 @@ class SuspensionModule(FeatureModule):
         self._start_ramp(
             start, self._target(self._lowered), self._ramp_seconds, reverse=not self._lowered
         )
+        if self._air_camber:
+            camber_target = (
+                self._air_camber_target() if self._lowered else self._configured_camber()
+            )
+            if start_camber and all(value is not None for value in camber_target):
+                self._start_camber_ramp(start_camber, camber_target, self._ramp_seconds)
 
     def set_bounce(self, enabled: bool) -> None:
         """Start or stop the continuous up/down cycle."""
@@ -644,6 +796,45 @@ class SuspensionModule(FeatureModule):
             thread.join(timeout=1.0)
         self._thread = None
 
+    def _start_camber_ramp(self, start, end, seconds: float) -> None:
+        self._camber_cancel.clear()
+        self._camber_thread = threading.Thread(
+            target=self._camber_ramp,
+            daemon=True,
+            name="neptune-airride-camber",
+            args=(list(start), list(end), float(seconds)),
+        )
+        self._camber_thread.start()
+
+    def _cancel_camber_ramp(self) -> None:
+        self._camber_cancel.set()
+        thread = self._camber_thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        self._camber_thread = None
+
+    def _camber_ramp(self, start, end, seconds: float) -> None:
+        """Animate table camber without overloading remote memory writes."""
+        seconds = max(0.05, float(seconds))
+        steps = max(1, int(seconds * CAMBER_RAMP_HZ))
+        interval = seconds / steps
+        curve = list(self._camber_curve)
+        try:
+            for step in range(steps + 1):
+                if self._camber_cancel.is_set() or self.vehicle is None:
+                    return
+                fraction = curve_value(curve, step / steps)
+                values = [
+                    origin + (destination - origin) * fraction
+                    for origin, destination in zip(start, end, strict=True)
+                ]
+                if not self._write_camber(values):
+                    return
+                if step < steps:
+                    time.sleep(interval)
+        except Exception:
+            return
+
     def _axle_phase(self, wheel: int, reverse: bool) -> tuple[float, float]:
         if self._sequence == "together":
             return 0.0, 1.0
@@ -729,6 +920,7 @@ class SuspensionModule(FeatureModule):
         from neptune.ui.widgets.buttons import Button, PrimaryButton
 
         height_card = page.add_card("Ride height", "Moves the height the car normally sits at.")
+        self._widgets["height_card"] = height_card
 
         front = SliderRow(
             "Front",
@@ -763,6 +955,7 @@ class SuspensionModule(FeatureModule):
         height_card.add(reset_button)
 
         camber_card = page.add_card("Camber", HINT_CAMBER)
+        self._widgets["camber_card"] = camber_card
 
         camber_mirror = ToggleRow("Mirror axles", self._camber_mirror, hint=HINT_CAMBER_MIRROR)
         camber_mirror.toggle.toggled_value.connect(self._set_camber_mirror)
@@ -952,6 +1145,51 @@ class SuspensionModule(FeatureModule):
         self._widgets["sequence"] = sequence
         air_card.add(FieldRow("Order", sequence, hint=HINT_SEQUENCE))
 
+        air_camber_card = page.add_card("Air ride camber", HINT_AIR_CAMBER)
+
+        air_camber = ToggleRow("Animate with air ride", self._air_camber, hint=HINT_AIR_CAMBER)
+        air_camber.toggle.toggled_value.connect(self._set_air_camber)
+        self._widgets["air_camber"] = air_camber
+        air_camber_card.add(air_camber)
+
+        for key, axle, label, value in (
+            (
+                "air_camber_front",
+                "front",
+                "Lowered front",
+                self._air_camber_front,
+            ),
+            (
+                "air_camber_rear",
+                "rear",
+                "Lowered rear",
+                self._air_camber_rear,
+            ),
+        ):
+            target = SliderRow(
+                label,
+                CAMBER_MIN_DEG,
+                CAMBER_MAX_DEG,
+                value,
+                step=0.1,
+                decimals=1,
+                unit="°",
+                hint="The left-wheel angle when the car is fully lowered; the right mirrors it.",
+            )
+            target.changed.connect(lambda amount, a=axle: self._set_air_camber_target(a, amount))
+            self._widgets[key] = target
+            air_camber_card.add(target)
+
+        curve = TransitionCurve(self._camber_curve)
+        curve.changed.connect(self._set_camber_curve)
+        self._widgets["camber_curve"] = curve
+        air_camber_card.add(curve)
+
+        reset_curve = Button("Reset camber curve")
+        reset_curve.setToolTip(HINT_CAMBER_CURVE)
+        reset_curve.clicked.connect(curve.reset)
+        air_camber_card.add(reset_curve)
+
         bounce_card = page.add_card("Maybach bounce", "Rocks the car up and down on repeat.")
 
         bounce_toggle = ToggleRow("Bounce", self._bounce, hint=HINT_BOUNCE)
@@ -1066,6 +1304,10 @@ class SuspensionModule(FeatureModule):
             "bounce_high": self._bounce_high,
             "bounce_speed": self._bounce_speed,
             "bounce_audio": self._bounce_audio,
+            "air_camber": self._air_camber,
+            "air_camber_front": self._air_camber_front,
+            "air_camber_rear": self._air_camber_rear,
+            "camber_curve": list(self._camber_curve),
             "camber_fl": self._camber[0],
             "camber_fr": self._camber[1],
             "camber_rr": self._camber[2],
@@ -1126,6 +1368,15 @@ class SuspensionModule(FeatureModule):
         )
         self._bounce_audio = bool(data.get("bounce_audio", True))
 
+        self._air_camber = bool(data.get("air_camber", False))
+        self._air_camber_front = _number(
+            "air_camber_front", CAMBER_AIR_DEFAULT_FRONT, CAMBER_MIN_DEG, CAMBER_MAX_DEG
+        )
+        self._air_camber_rear = _number(
+            "air_camber_rear", CAMBER_AIR_DEFAULT_REAR, CAMBER_MIN_DEG, CAMBER_MAX_DEG
+        )
+        self._camber_curve = normalise_curve(data.get("camber_curve", DEFAULT_CURVE))
+
         self._camber = [
             (
                 _number(key, 0.0, CAMBER_MIN_DEG, CAMBER_MAX_DEG)
@@ -1136,7 +1387,7 @@ class SuspensionModule(FeatureModule):
         ]
         self._camber_mirror = bool(data.get("camber_mirror", True))
         if any(value is not None for value in self._camber):
-            self._write_camber()
+            self._write_active_camber()
 
         self._track = [
             (

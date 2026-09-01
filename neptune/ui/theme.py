@@ -93,6 +93,9 @@ def stylesheet() -> str:
     color: {TEXT};
     outline: none;
 }}
+*:disabled {{
+    color: {TEXT_FAINT};
+}}
 
 QWidget#Root, QMainWindow {{
     background: {BG};
