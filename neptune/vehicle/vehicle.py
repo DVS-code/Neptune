@@ -302,6 +302,53 @@ class Vehicle:
                 ok = self.process.set_f32_array(entry + T.CAMBER_SIN, pair) and ok
         return bool(written) and ok
 
+    def track_curve(self, wheel: int) -> list[float] | None:
+        """This wheel's lateral (X) position across all ENTRY_COUNT travel samples,
+        as currently baked into its axle's kinematics table so that it can be used
+        to create a stock baseline before any set_track_width call, since once written the
+        live table no longer holds the original values to reread.
+        """
+        T = O.CamberTable
+        table = self._camber_table(wheel)
+        if not table:
+            return None
+        region = T.REGION[wheel]
+        values = []
+        for i in range(T.ENTRY_COUNT):
+            value = self.process.f32(table + region + i * T.ENTRY_SIZE + T.TRACK_X)
+            if value is None:
+                return None
+            values.append(value)
+        return values
+
+    def set_track_width(self, wheel: int, baseline: list[float], delta: float) -> bool:
+        T = O.CamberTable
+        table = self._camber_table(wheel)
+        if not table or not baseline or len(baseline) != T.ENTRY_COUNT:
+            return False
+        sign = -1.0 if wheel in (0, 3) else 1.0  # FL/RL sit on the negative-X side
+        region = T.REGION[wheel]
+        ok = True
+        for i in range(T.ENTRY_COUNT):
+            target = baseline[i] + sign * float(delta)
+            entry = table + region + i * T.ENTRY_SIZE
+            ok = self.process.set_f32(entry + T.TRACK_X, target) and ok
+            ok = self.process.set_f32(entry + T.TRACK_X_B, target) and ok
+        return ok
+
+    def track_width_ok(self, wheel: int, baseline: list[float], delta: float) -> bool | None:
+        T = O.CamberTable
+        table = self._camber_table(wheel)
+        if not table or not baseline:
+            return None
+        region = T.REGION[wheel]
+        current = self.process.f32(table + region + T.TRACK_X)
+        if current is None:
+            return None
+        sign = -1.0 if wheel in (0, 3) else 1.0
+        expected = baseline[0] + sign * delta
+        return abs(current - expected) < 1e-3
+
     @property
     def wheel_radius(self) -> list[float] | None:
         """Per-wheel radius in metres. Constant for a given car and tyre fitment."""

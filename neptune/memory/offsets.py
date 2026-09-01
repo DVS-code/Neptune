@@ -146,6 +146,15 @@ class CamberTable:
     axles. Each of the ENTRY_COUNT entries is a 112-byte kinematic pose;
     CAMBER_SIN/CAMBER_COS within it is the same half-angle (sin, cos) pair as
     Wheels.CAMBER_SIN/CAMBER_COS, in both regions.
+
+    TRACK_X/TRACK_X_B: two points per entry (wheel centre and, going by the offset
+    gap, likely the contact patch) that always carry the SAME lateral (X) value —
+    confirmed live, at every travel index sampled. That value flips sign between
+    a wheel and its mirrored partner while the other axes stay identical (FL
+    negative, FR positive), and it changes with travel (scrub), so this is track
+    width baked into the same curve camber lives in — a delta from wherever this
+    is now, not a target CAMBER_SIN/COS-style absolute (write-tested live: shifted
+    a car's front track outward, restored it, no crash, camber untouched).
     """
 
     PTR = 0x408
@@ -162,6 +171,8 @@ class CamberTable:
     ENTRY_COUNT = 30
     CAMBER_SIN = 0x18
     CAMBER_COS = 0x1C
+    TRACK_X = 0x00
+    TRACK_X_B = 0x50
 
 
 class CarConfig:

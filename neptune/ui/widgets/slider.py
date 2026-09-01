@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from qfluentwidgets import Slider as FluentSlider
+
+from neptune.ui import theme as T
 
 RESOLUTION = 1000
 
@@ -52,3 +54,9 @@ class Slider(FluentSlider):
             event.ignore()
             return
         super().wheelEvent(event)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange:
+            colour = T.ACCENT if self.isEnabled() else T.TEXT_FAINT
+            self.setThemeColor(colour, colour)
