@@ -17,7 +17,7 @@ while you drive: torque delivery, boost and ride height.
 |---|---|
 | **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
 | **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, a boost map you can shape per engine speed, and a scramble button for a burst of boost on demand. |
-| **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp. |
+| **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp, or bounce it between two heights. Camber, track width and toe, per wheel or mirrored per axle, with camber optionally shifting to its own values whenever air ride drops. Warns when a car's rear axle or tires won't respond to these. |
 | **Boost Gauge** | A floating boost gauge on top of the game, as a dial, a digital readout or a bar. |
 | **Dragy** | Time your car between two speeds, or over 60 ft, 1/8 mile and 1/4 mile, with an on-screen timer and recent runs. |
 | **Car** | Shows which car you’re currently in, along with a preview of the car and how it’s aspirated.. |
