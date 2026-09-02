@@ -123,6 +123,12 @@ class Wheels:
     CAMBER_SIN = 0x0120
     CAMBER_COS = 0x0124
 
+    TOE = 0x0358
+    """Static toe, in radians — a plain live scalar (no half-angle sin/cos), writes
+    stick immediately and survive a physics tick, matches what the game's own
+    tuning menu shows. Sign is per-wheel as stored (not auto-mirrored).
+    This field alone is only visually enough for the FRONT wheels."""
+
     @classmethod
     def addr(cls, car: int, wheel: int, field: int) -> int:
         return car + cls.BASE + wheel * cls.STRIDE + field
@@ -173,6 +179,8 @@ class CamberTable:
     CAMBER_COS = 0x1C
     TRACK_X = 0x00
     TRACK_X_B = 0x50
+
+    TOE_SIN = 0x14
 
 
 class CarConfig:

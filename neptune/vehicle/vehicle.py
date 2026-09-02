@@ -15,6 +15,32 @@ MAX_CURVE_POINTS = 246
 ROLLING_RADIUS_M = 0.34
 NM_RPM_TO_HP = 7127.0
 
+# Every car with UseTireRigidBodies=1 in the game's own db
+RIGID_BODY_TIRE_CARS = frozenset(
+    {
+        "AC_122_Class1_20",
+        "AC_6165_Class6100_21",
+        "AC_Class10_15",
+        "FOR_25_Ultra4Bronco_17",
+        "FOR_F250Deberti_19",
+        "FOR_F450DRWFE_20",
+        "GMC_HummerEV_22",
+        "GMC_Jimmy_70",
+        "HON_TrophyTruck_15",
+        "JEE_4422_Trophy_19",
+        "JIM_HammerHeadBuggy_19",
+        "JIM_TrophyTruck_19",
+        "NIS_GTRFE_12",
+        "PEN_Cholla_11",
+        "POL_51_RZRDakar_21",
+        "POL_RZRProXP_21",
+        "SIE_00_700R_21",
+        "SIE_00_RX3_21",
+        "SUB_BRZFE_22",
+        "VW_Class5Bug_69",
+    }
+)
+
 
 class Vehicle:
     """A live car. Holds addresses only; every value is read on demand."""
@@ -273,6 +299,47 @@ class Vehicle:
             values.append(2.0 * math.degrees(math.atan2(sin, cos)))
         return values
 
+    @property
+    def toe(self) -> list[float] | None:
+
+        values = self.wheel_read(O.Wheels.TOE)
+        return [math.degrees(v) for v in values] if values else None
+
+    def set_toe(self, values) -> bool:
+
+        T = O.CamberTable
+        ok = True
+        wrote = False
+        written: set[tuple[int, int]] = set()
+        for wheel, degrees in enumerate(values[: O.Wheels.COUNT]):
+            if degrees is None:
+                continue
+            degrees = float(degrees)
+            wrote = True
+            table = self._camber_table(wheel)
+            if not table:
+                continue
+            region = T.REGION[wheel]
+            key = (table, region)
+            if key in written:
+                continue
+            written.add(key)
+            half_sin = math.sin(math.radians(degrees) / 2.0)
+            for i in range(T.ENTRY_COUNT):
+                entry = table + region + i * T.ENTRY_SIZE
+                ok = self.process.set_f32(entry + T.TOE_SIN, half_sin) and ok
+        return wrote and ok
+
+    def toe_baked(self, wheel: int) -> float | None:
+        T = O.CamberTable
+        table = self._camber_table(wheel)
+        if not table:
+            return None
+        sin_v = self.process.f32(table + T.REGION[wheel] + T.TOE_SIN)
+        if sin_v is None or not (-1.0 <= sin_v <= 1.0):
+            return None
+        return math.degrees(2.0 * math.asin(sin_v))
+
     def _camber_table(self, wheel: int) -> int | None:
         """This wheel's axle camber-kinematics table address (see offsets.CamberTable)."""
         T = O.CamberTable
@@ -348,6 +415,24 @@ class Vehicle:
         sign = -1.0 if wheel in (0, 3) else 1.0
         expected = baseline[0] + sign * delta
         return abs(current - expected) < 1e-3
+
+    def rear_axle_is_solid(self) -> bool | None:
+        rr = self.track_curve(2)
+        rl = self.track_curve(3)
+        if not rr or not rl or len(rr) != len(rl):
+            return None
+        mirrored = sum(1 for a, b in zip(rr, rl) if a * b < 0)
+        if mirrored >= len(rr) * 0.9:
+            return False
+        if mirrored <= len(rr) * 0.1:
+            return True
+        return None
+
+    def uses_rigid_body_tires(self) -> bool | None:
+        name = self.media_name
+        if name is None:
+            return None
+        return name in RIGID_BODY_TIRE_CARS
 
     @property
     def wheel_radius(self) -> list[float] | None:

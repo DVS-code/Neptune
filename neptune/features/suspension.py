@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
-from neptune.ui.widgets.card import FieldRow, StatStrip, ToggleRow
+from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import BindButton, Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
 from neptune.ui.widgets.transitioncurve import (
@@ -57,11 +57,16 @@ CAMBER_AIR_DEFAULT_REAR = -6.0
 TRACK_MIN_MM = -150.0
 TRACK_MAX_MM = 150.0
 
+TOE_MIN_DEG = -15.0
+TOE_MAX_DEG = 15.0
+
 HINT_AXLE = "Raises or lowers this axle, as a share of normal ride height."
 HINT_CAMBER = "Static camber, per wheel — each corner is independent."
 HINT_CAMBER_MIRROR = "One value per axle instead of four — the right wheel mirrors the left."
 HINT_TRACK = "Track width, per wheel — how far outward each corner sits."
 HINT_TRACK_MIRROR = "One value per axle instead of four — both wheels move together."
+HINT_TOE = "Static toe, per wheel — each corner is independent."
+HINT_TOE_MIRROR = "One value per axle instead of four — the right wheel mirrors the left."
 HINT_DROP = "How far air ride drops the car."
 HINT_AIR_CAMBER = (
     "Moves camber from the values above to the lowered values whenever air ride drops."
@@ -77,6 +82,15 @@ HINT_BOUNCE = "Rocks the car up and down between the two heights, over and over.
 HINT_BOUNCE_RANGE = "The lowest and highest the car sits while bouncing."
 HINT_BOUNCE_SPEED = "How quickly the car cycles between the two heights."
 HINT_BOUNCE_AUDIO = "Plays a track on loop while the bounce is running."
+
+NOTE_SOLID_REAR_AXLE = (
+    "This car's rear suspension is a solid axle — camber, track width and toe changes "
+    "have no effect on the rear wheels here."
+)
+NOTE_RIGID_BODY_TIRES = (
+    "This car uses rigid-body tire physics — camber, track width and toe changes may "
+    "have no effect here."
+)
 
 
 def _axle_text(settings, first: float | None, second: float | None) -> str:
@@ -114,6 +128,13 @@ class SuspensionModule(FeatureModule):
         self._camber_curve = list(DEFAULT_CURVE)
         self._camber_thread: threading.Thread | None = None
         self._camber_cancel = threading.Event()
+
+        self._rear_solid_axle: bool | None = None
+        self._rigid_body_tires: bool | None = None
+
+        self.stock_toe: list[float] | None = None
+        self._toe: list[float | None] = [None, None, None, None]  # FL, FR, RR, RL
+        self._toe_mirror = True
 
         self.stock_track: list[list[float] | None] = [None, None, None, None]  # 30-pt curve/wheel
         self._track: list[float | None] = [None, None, None, None]  # held delta, mm, FL/FR/RR/RL
@@ -166,6 +187,12 @@ class SuspensionModule(FeatureModule):
         ]
         track_keys = ("track_fl", "track_fr", "track_rr", "track_rl")
         track_values = [value if value is not None else 0.0 for value in self._track]
+        toe_stock = self.stock_toe
+        toe_keys = ("toe_fl", "toe_fr", "toe_rr", "toe_rl")
+        toe_values = [
+            self._toe[i] if self._toe[i] is not None else (toe_stock[i] if toe_stock else None)
+            for i in range(4)
+        ]
         for key, value in (
             ("front", self._front_percent),
             ("rear", self._rear_percent),
@@ -183,6 +210,9 @@ class SuspensionModule(FeatureModule):
             *zip(track_keys, track_values, strict=True),
             ("track_axle_front", track_values[0]),
             ("track_axle_rear", track_values[3]),
+            *zip(toe_keys, toe_values, strict=True),
+            ("toe_axle_front", toe_values[0]),
+            ("toe_axle_rear", toe_values[3]),
         ):
             slider = self._widgets.get(key)
             if slider is not None and value is not None:
@@ -192,6 +222,7 @@ class SuspensionModule(FeatureModule):
             ("bounce_audio", self._bounce_audio),
             ("camber_mirror", self._camber_mirror),
             ("track_mirror", self._track_mirror),
+            ("toe_mirror", self._toe_mirror),
             ("air_camber", self._air_camber),
         ):
             row = self._widgets.get(key)
@@ -212,6 +243,12 @@ class SuspensionModule(FeatureModule):
         track_axle_panel = self._widgets.get("track_axle_panel")
         if track_axle_panel is not None:
             track_axle_panel.setVisible(self._track_mirror)
+        toe_wheels_panel = self._widgets.get("toe_wheels_panel")
+        if toe_wheels_panel is not None:
+            toe_wheels_panel.setVisible(not self._toe_mirror)
+        toe_axle_panel = self._widgets.get("toe_axle_panel")
+        if toe_axle_panel is not None:
+            toe_axle_panel.setVisible(self._toe_mirror)
         selector = self._widgets.get("sequence")
         if selector is not None:
             selector.set_value(SEQUENCE_LABELS[self._sequence])
@@ -240,7 +277,43 @@ class SuspensionModule(FeatureModule):
         self._capture_stock(vehicle)
         self._capture_camber_stock(vehicle)
         self._capture_track_stock(vehicle)
+        self._capture_toe_stock(vehicle)
+        self._check_rear_axle(vehicle)
         self._controls_dirty = True
+
+    def _check_rear_axle(self, vehicle) -> None:
+        """Detect a solid rear axle or rigid-body tire physics, so the camber,
+        track-width and toe cards can warn that editing them may have no effect.
+        See docs/SOLID_AXLE_SUSPENSION.md.
+
+        Each check is left `None` (and re-tried next tick) until a reading
+        actually succeeds, rather than defaulting to "not affected" — a
+        transient read failure should not silently hide a warning that's
+        actually needed.
+        """
+        if vehicle is None:
+            return
+        changed = False
+        if self._rear_solid_axle is None:
+            self._rear_solid_axle = vehicle.rear_axle_is_solid()
+            changed = changed or self._rear_solid_axle is not None
+        if self._rigid_body_tires is None:
+            self._rigid_body_tires = vehicle.uses_rigid_body_tires()
+            changed = changed or self._rigid_body_tires is not None
+        if changed:
+            self._update_axle_banner()
+
+    def _update_axle_banner(self) -> None:
+        if self._rigid_body_tires:
+            text = NOTE_RIGID_BODY_TIRES
+        elif self._rear_solid_axle:
+            text = NOTE_SOLID_REAR_AXLE
+        else:
+            text = ""
+        for key in ("camber_banner", "track_banner", "toe_banner"):
+            banner = self._widgets.get(key)
+            if banner is not None:
+                banner.set(text, "warn")
 
     def _capture_stock(self, vehicle) -> None:
         if self._lowered or self._ramping or self._front_percent or self._rear_percent:
@@ -266,6 +339,14 @@ class SuspensionModule(FeatureModule):
             return
         self.stock_camber = list(values)
 
+    def _capture_toe_stock(self, vehicle) -> None:
+        if any(value is not None for value in self._toe):
+            return
+        values = vehicle.toe if vehicle else None
+        if not values or any(value is None for value in values):
+            return
+        self.stock_toe = list(values)
+
     def _capture_track_stock(self, vehicle) -> None:
         if all(curve is not None for curve in self.stock_track):
             return
@@ -288,11 +369,17 @@ class SuspensionModule(FeatureModule):
         self.stock_camber = None
         self._track = [None, None, None, None]
         self.stock_track = [None, None, None, None]
+        self._toe = [None, None, None, None]
+        self.stock_toe = None
+        self._rear_solid_axle = None
+        self._rigid_body_tires = None
         self._controls_dirty = True
         self.vehicle = vehicle
         self._capture_stock(vehicle)
         self._capture_camber_stock(vehicle)
         self._capture_track_stock(vehicle)
+        self._capture_toe_stock(vehicle)
+        self._check_rear_axle(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -302,6 +389,8 @@ class SuspensionModule(FeatureModule):
             self._write_active_camber()
         if any(value is not None for value in self._track):
             self._write_track()
+        if any(value is not None for value in self._toe):
+            self._write_toe()
 
     def on_detach(self) -> None:
 
@@ -339,6 +428,11 @@ class SuspensionModule(FeatureModule):
                     vehicle.set_track_width(wheel, self.stock_track[wheel], 0.0)
             except Exception:
                 pass
+        if vehicle is not None and self.stock_toe:
+            try:
+                vehicle.set_toe(self.stock_toe)
+            except Exception:
+                pass
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
@@ -346,6 +440,7 @@ class SuspensionModule(FeatureModule):
         self._air_camber = False
         self._air_camber_backup = None
         self._track = [None, None, None, None]
+        self._toe = [None, None, None, None]
         self._controls_dirty = True
 
     def reset_controls(self) -> None:
@@ -362,6 +457,7 @@ class SuspensionModule(FeatureModule):
         self._camber_curve = list(DEFAULT_CURVE)
         self._cancel_camber_ramp()
         self._track = [None, None, None, None]
+        self._toe = [None, None, None, None]
         self._controls_dirty = True
 
     def tick(self, vehicle) -> None:
@@ -372,11 +468,16 @@ class SuspensionModule(FeatureModule):
             self._capture_camber_stock(vehicle)
         if any(curve is None for curve in self.stock_track):
             self._capture_track_stock(vehicle)
+        if self.stock_toe is None:
+            self._capture_toe_stock(vehicle)
+        if self._rear_solid_axle is None or self._rigid_body_tires is None:
+            self._check_rear_axle(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
         self._reapply_if_rebaked(vehicle)
         self._reapply_camber_if_rebaked(vehicle)
         self._reapply_track_if_rebaked(vehicle)
+        self._reapply_toe_if_rebaked(vehicle)
 
     def _reapply_if_rebaked(self, vehicle) -> None:
         """Re-apply ride height when the game has quietly put stock height back."""
@@ -419,6 +520,25 @@ class SuspensionModule(FeatureModule):
                 continue
             if vehicle.track_width_ok(wheel, baseline, delta_mm / 1000.0) is False:
                 self._write_track()
+                return
+
+    def _reapply_toe_if_rebaked(self, vehicle) -> None:
+        """Re-apply toe if the game has quietly rebaked the axle's table.
+
+        `set_toe()` only writes the baked table (see its docstring), not the
+        live `Wheels.TOE` field the `toe` property reads — so unlike camber and
+        track, this can't compare against `vehicle.toe`, which never reflects
+        our own writes at all. Spot-check the table itself instead.
+        """
+        if vehicle is None or not any(value is not None for value in self._toe):
+            return
+        target = self._configured_toe()
+        for wheel, expected in enumerate(target):
+            if expected is None:
+                continue
+            actual = vehicle.toe_baked(wheel)
+            if actual is not None and abs(actual - expected) > 0.05:
+                self._write_toe(target)
                 return
 
     @property
@@ -498,8 +618,7 @@ class SuspensionModule(FeatureModule):
         """Raised camber, filling unset corners from the captured stock values."""
         stock = self.stock_camber or [None] * WHEEL_COUNT
         return [
-            value if value is not None else stock[index]
-            for index, value in enumerate(self._camber)
+            value if value is not None else stock[index] for index, value in enumerate(self._camber)
         ]
 
     def _air_camber_target(self) -> list[float]:
@@ -676,12 +795,68 @@ class SuspensionModule(FeatureModule):
         if vehicle is not None and all(curve is not None for curve in self.stock_track):
             for wheel, curve in enumerate(self.stock_track):
                 vehicle.set_track_width(wheel, curve, 0.0)
-        for key in ("track_fl", "track_fr", "track_rr", "track_rl",
-                    "track_axle_front", "track_axle_rear"):
+        for key in (
+            "track_fl",
+            "track_fr",
+            "track_rr",
+            "track_rl",
+            "track_axle_front",
+            "track_axle_rear",
+        ):
             slider = self._widgets.get(key)
             if slider is not None:
                 slider.set_value(0.0)
         self._track = [None, None, None, None]
+
+    def _configured_toe(self) -> list[float | None]:
+        """Held toe, filling unset corners from the captured stock values."""
+        stock = self.stock_toe or [None] * WHEEL_COUNT
+        return [
+            value if value is not None else stock[index] for index, value in enumerate(self._toe)
+        ]
+
+    def _write_toe(self, values=None) -> bool:
+        vehicle = self.vehicle
+        if vehicle is None:
+            return False
+        target = self._configured_toe() if values is None else values
+        if any(value is None for value in target):
+            return False
+        return bool(vehicle.set_toe(target))
+
+    def _set_toe(self, wheel: int, value: float) -> None:
+        self._toe[wheel] = float(value)
+        self._write_toe()
+
+    def _set_toe_axle(self, axle: str, value: float) -> None:
+        """Mirror-mode entry point: one value per axle, right wheel negated."""
+        value = float(value)
+        if axle == "front":
+            self._toe[0], self._toe[1] = value, -value
+        else:
+            self._toe[3], self._toe[2] = value, -value
+        self._write_toe()
+
+    def _set_toe_mirror(self, enabled: bool) -> None:
+        self._toe_mirror = bool(enabled)
+        self._sync_controls()
+
+    def _reset_toe(self) -> None:
+        stock = self.stock_toe
+        self._toe = list(stock) if stock else [None, None, None, None]
+        for key, value in zip(("toe_fl", "toe_fr", "toe_rr", "toe_rl"), self._toe, strict=True):
+            slider = self._widgets.get(key)
+            if slider is not None and value is not None:
+                slider.set_value(value)
+        for key, value in (
+            ("toe_axle_front", self._toe[0]),
+            ("toe_axle_rear", self._toe[3]),
+        ):
+            slider = self._widgets.get(key)
+            if slider is not None and value is not None:
+                slider.set_value(value)
+        self._write_toe()
+        self._toe = [None, None, None, None]
 
     def toggle(self) -> None:
         if not self.stock or self.vehicle is None:
@@ -957,6 +1132,10 @@ class SuspensionModule(FeatureModule):
         camber_card = page.add_card("Camber", HINT_CAMBER)
         self._widgets["camber_card"] = camber_card
 
+        camber_banner = Banner("", "warn")
+        self._widgets["camber_banner"] = camber_banner
+        camber_card.add(camber_banner)
+
         camber_mirror = ToggleRow("Mirror axles", self._camber_mirror, hint=HINT_CAMBER_MIRROR)
         camber_mirror.toggle.toggled_value.connect(self._set_camber_mirror)
         self._widgets["camber_mirror"] = camber_mirror
@@ -1022,6 +1201,10 @@ class SuspensionModule(FeatureModule):
 
         track_card = page.add_card("Track Width", HINT_TRACK)
 
+        track_banner = Banner("", "warn")
+        self._widgets["track_banner"] = track_banner
+        track_card.add(track_banner)
+
         track_mirror = ToggleRow("Mirror axles", self._track_mirror, hint=HINT_TRACK_MIRROR)
         track_mirror.toggle.toggled_value.connect(self._set_track_mirror)
         self._widgets["track_mirror"] = track_mirror
@@ -1082,6 +1265,75 @@ class SuspensionModule(FeatureModule):
         track_reset_button = Button("Reset to stock track width")
         track_reset_button.clicked.connect(self._reset_track)
         track_card.add(track_reset_button)
+
+        toe_card = page.add_card("Toe", HINT_TOE)
+
+        toe_banner = Banner("", "warn")
+        self._widgets["toe_banner"] = toe_banner
+        toe_card.add(toe_banner)
+
+        toe_mirror = ToggleRow("Mirror axles", self._toe_mirror, hint=HINT_TOE_MIRROR)
+        toe_mirror.toggle.toggled_value.connect(self._set_toe_mirror)
+        self._widgets["toe_mirror"] = toe_mirror
+        toe_card.add(toe_mirror)
+
+        stock_toe = self.stock_toe
+
+        toe_wheels_panel = QWidget()
+        toe_wheels_panel.setVisible(not self._toe_mirror)
+        toe_wheels_layout = QVBoxLayout(toe_wheels_panel)
+        toe_wheels_layout.setContentsMargins(0, 0, 0, 0)
+        toe_wheels_layout.setSpacing(12)
+        for wheel, (key, label) in enumerate(
+            (
+                ("toe_fl", "Front Left"),
+                ("toe_fr", "Front Right"),
+                ("toe_rr", "Rear Right"),
+                ("toe_rl", "Rear Left"),
+            )
+        ):
+            toe_slider = SliderRow(
+                label,
+                TOE_MIN_DEG,
+                TOE_MAX_DEG,
+                stock_toe[wheel] if stock_toe else 0.0,
+                step=0.1,
+                decimals=1,
+                unit="°",
+            )
+            toe_slider.changed.connect(lambda value, w=wheel: self._set_toe(w, value))
+            self._widgets[key] = toe_slider
+            toe_wheels_layout.addWidget(toe_slider)
+        self._widgets["toe_wheels_panel"] = toe_wheels_panel
+        toe_card.add(toe_wheels_panel)
+
+        toe_axle_panel = QWidget()
+        toe_axle_panel.setVisible(self._toe_mirror)
+        toe_axle_layout = QVBoxLayout(toe_axle_panel)
+        toe_axle_layout.setContentsMargins(0, 0, 0, 0)
+        toe_axle_layout.setSpacing(12)
+        for key, axle, label in (
+            ("toe_axle_front", "front", "Front"),
+            ("toe_axle_rear", "rear", "Rear"),
+        ):
+            toe_axle_slider = SliderRow(
+                label,
+                TOE_MIN_DEG,
+                TOE_MAX_DEG,
+                stock_toe[0 if axle == "front" else 3] if stock_toe else 0.0,
+                step=0.1,
+                decimals=1,
+                unit="°",
+            )
+            toe_axle_slider.changed.connect(lambda value, a=axle: self._set_toe_axle(a, value))
+            self._widgets[key] = toe_axle_slider
+            toe_axle_layout.addWidget(toe_axle_slider)
+        self._widgets["toe_axle_panel"] = toe_axle_panel
+        toe_card.add(toe_axle_panel)
+
+        toe_reset_button = Button("Reset to stock toe")
+        toe_reset_button.clicked.connect(self._reset_toe)
+        toe_card.add(toe_reset_button)
 
         air_card = page.add_card("Air ride", "Drops the car on a key press.")
 
@@ -1255,6 +1507,8 @@ class SuspensionModule(FeatureModule):
         self._widgets["stats"] = stats
         live_card.add(stats)
 
+        self._update_axle_banner()
+
     def refresh(self, vehicle) -> None:
         stats = self._widgets.get("stats")
         if stats is None:
@@ -1318,6 +1572,11 @@ class SuspensionModule(FeatureModule):
             "track_rr": self._track[2],
             "track_rl": self._track[3],
             "track_mirror": self._track_mirror,
+            "toe_fl": self._toe[0],
+            "toe_fr": self._toe[1],
+            "toe_rr": self._toe[2],
+            "toe_rl": self._toe[3],
+            "toe_mirror": self._toe_mirror,
         }
 
     def load_state(self, data: dict) -> None:
@@ -1390,15 +1649,19 @@ class SuspensionModule(FeatureModule):
             self._write_active_camber()
 
         self._track = [
-            (
-                _number(key, 0.0, TRACK_MIN_MM, TRACK_MAX_MM)
-                if data.get(key) is not None
-                else None
-            )
+            (_number(key, 0.0, TRACK_MIN_MM, TRACK_MAX_MM) if data.get(key) is not None else None)
             for key in ("track_fl", "track_fr", "track_rr", "track_rl")
         ]
         self._track_mirror = bool(data.get("track_mirror", True))
         if any(value is not None for value in self._track):
             self._write_track()
+
+        self._toe = [
+            (_number(key, 0.0, TOE_MIN_DEG, TOE_MAX_DEG) if data.get(key) is not None else None)
+            for key in ("toe_fl", "toe_fr", "toe_rr", "toe_rl")
+        ]
+        self._toe_mirror = bool(data.get("toe_mirror", True))
+        if any(value is not None for value in self._toe):
+            self._write_toe()
 
         self._controls_dirty = True
