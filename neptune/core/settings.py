@@ -23,6 +23,7 @@ DEFAULTS = {
     "restore_on_exit": True,
     "airride_volume": 70,
     "maybach_volume": 70,
+    "hydraulics_volume": 70,
     "check_for_updates": True,
     "skip_update_version": "",
     "bindings": {},

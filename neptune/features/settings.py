@@ -20,6 +20,7 @@ HINT_ATMOSPHERIC = (
 )
 HINT_AIRRIDE_VOLUME = "The air-release hiss when the car drops."
 HINT_MAYBACH_VOLUME = "The track that loops while the Maybach bounce runs."
+HINT_HYDRAULIC_VOLUME = "The hydraulic whirr when hydraulics engage."
 HINT_AUTO_ATTACH = "Connect to Forza Horizon 6 automatically when Neptune starts."
 HINT_RESTORE = "Put every change back to stock when Neptune closes."
 HINT_UPDATES = "Look for a newer Neptune when the tool starts."
@@ -109,6 +110,22 @@ class SettingsModule(FeatureModule):
         )
         self._widgets["maybach_volume"] = maybach_volume
         sound_card.add(maybach_volume)
+
+        hydraulics_volume = SliderRow(
+            "Hydraulics",
+            0,
+            100,
+            self.settings.get("hydraulics_volume"),
+            step=1,
+            decimals=0,
+            unit="%",
+            hint=HINT_HYDRAULIC_VOLUME,
+        )
+        hydraulics_volume.changed.connect(
+            lambda value: self.settings.set("hydraulics_volume", int(value))
+        )
+        self._widgets["hydraulics_volume"] = hydraulics_volume
+        sound_card.add(hydraulics_volume)
 
         startup_card = page.add_card("Startup")
 
