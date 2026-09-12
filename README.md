@@ -17,7 +17,7 @@ while you drive: torque delivery, boost and ride height.
 |---|---|
 | **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
 | **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, a boost map you can shape per engine speed, and a scramble button for a burst of boost on demand. |
-| **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp, or bounce it between two heights. Camber, track width and toe, per wheel or mirrored per axle, with camber optionally shifting to its own values whenever air ride drops. Warns when a car's rear axle or tires won't respond to these. |
+| **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp, or bounce it between two heights. Manual lowrider hydraulics — hop an axle, a side or a single corner, hold a front/back/left/right down pose, or slam all four up or down, each bindable to its own key. Camber, track width and toe, per wheel or mirrored per axle, with camber optionally shifting to its own values whenever air ride drops. Warns when a car's rear axle or tires won't respond to these. |
 | **Boost Gauge** | A floating boost gauge on top of the game, as a dial, a digital readout or a bar. |
 | **Dragy** | Time your car between two speeds, or over 60 ft, 1/8 mile and 1/4 mile, with an on-screen timer and recent runs. |
 | **Car** | Shows which car you’re currently in, along with a preview of the car and how it’s aspirated.. |
@@ -25,10 +25,10 @@ while you drive: torque delivery, boost and ride height.
 | **Presets** | Save and reload whole setups. |
 | **Settings** | Units, display and startup behaviour. |
 
-Anti-lag, launch control, air ride, scramble and tune switching can each be
-bound to a key, a controller button or a racing-wheel button, on their own tab.
-A control only ever drives one feature — binding one that is already in use
-takes it from whatever held it.
+Anti-lag, launch control, air ride, hydraulics, scramble and tune switching can
+each be bound to a key, a controller button or a racing-wheel button, on their
+own tab. A control only ever drives one feature — binding one that is already
+in use takes it from whatever held it.
 
 Every setting has a **?** next to it. Hover or click it for an explanation of
 what that control does.
@@ -104,6 +104,8 @@ Adding a feature is one file in `features/` and one line in `app.py`.
 **@Zephyris-Pro** — Collaborator with @DVS-code on implementing the memory module and designing the UI.
 
 **@HDR** — Maintainer of the FH6 car ID list.
+
+**@JDMH2000** — Contributed the manual hydraulics feature.
 
 **@D3FEKT** — Owner of ForzaTechStudio. Special thanks for the implementation of .swatchbin support.
 

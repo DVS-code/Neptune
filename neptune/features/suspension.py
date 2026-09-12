@@ -5,13 +5,13 @@ from __future__ import annotations
 import threading
 import time
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
-from neptune.ui.widgets.controls import BindButton, Segmented
+from neptune.ui.widgets.controls import BindButton, Segmented, SectionHeading
 from neptune.ui.widgets.sliderrow import SliderRow
 from neptune.ui.widgets.transitioncurve import (
     DEFAULT_CURVE,
@@ -39,6 +39,40 @@ BOUNCE_SPEED_MAX = 4.0
 BOUNCE_DEFAULT_SPEED = 1.0
 BOUNCE_HZ = 60
 
+
+HYDRAULICS_LIFT_MIN_M = 0.05
+HYDRAULICS_LIFT_MAX_M = 0.80
+HYDRAULICS_DEFAULT_LIFT_M = 0.20
+
+HYDRAULICS_SOUND_COOLDOWN = 0.10
+
+HYDRAULICS_MANUAL_GROUPS = {
+    "front": (0, 1),
+    "rear": (2, 3),
+    "left": (0, 3),
+    "right": (1, 2),
+    "fl": (0,),
+    "fr": (1,),
+    "rl": (3,),
+    "rr": (2,),
+}
+
+HYDRAULICS_DOWN_POSES = {
+    "front_down": (0, 1),
+    "rear_down": (2, 3),
+    "left_down": (0, 3),
+    "right_down": (1, 2),
+}
+
+HYDRAULICS_ALL_ACTIONS = {
+    "all_up": 1.0,
+    "all_down": -1.0,
+}
+
+# Precomputed once so tick() doesn't rebuild these tuples every pass.
+HYDRAULICS_GROUP_KEYS = tuple(HYDRAULICS_MANUAL_GROUPS)
+HYDRAULICS_DOWN_POSE_KEYS = tuple(HYDRAULICS_DOWN_POSES)
+HYDRAULICS_ALL_ACTION_KEYS = tuple(HYDRAULICS_ALL_ACTIONS)
 
 HARD_FLOOR_M = 0.01
 
@@ -124,6 +158,7 @@ class SuspensionModule(FeatureModule):
         self._air_camber = False
         self._air_camber_front = CAMBER_AIR_DEFAULT_FRONT
         self._air_camber_rear = CAMBER_AIR_DEFAULT_REAR
+        self._air_camber_preview = False
         self._air_camber_backup: tuple[float, float, list[float | None]] | None = None
         self._camber_curve = list(DEFAULT_CURVE)
         self._camber_thread: threading.Thread | None = None
@@ -148,6 +183,14 @@ class SuspensionModule(FeatureModule):
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._edge = inp.EdgeDetector()
+        self._hydraulics_edges = {
+            key: inp.EdgeDetector()
+            for key in (
+                "front", "rear", "left", "right", "fl", "fr", "rl", "rr",
+                "front_down", "rear_down", "left_down", "right_down",
+                "all_up", "all_down",
+            )
+        }
         self._controls_dirty = False
         self._widgets: dict = {}
 
@@ -159,12 +202,26 @@ class SuspensionModule(FeatureModule):
         self._bounce_thread: threading.Thread | None = None
         self._bounce_cancel = threading.Event()
 
+        self._hydraulics = False
+
+        self._hydraulics_thread: threading.Thread | None = None
+        self._hydraulics_cancel = threading.Event()
+        self._hydraulics_last_sound = 0.0
+        self._hydraulics_manual_up = [False] * WHEEL_COUNT
+        self._hydraulics_manual_height = HYDRAULICS_DEFAULT_LIFT_M
+        self._hydraulics_manual_speed = 0.14
+        self._hydraulics_down_pose: str | None = None
+
         from neptune.core.audio import Loop, OneShot
 
         self._slam = OneShot("sfx/slam.wav")
         self._maybach = Loop("sfx/maybach.mp3")
+        self._hydraulic = OneShot("sfx/hydraulics.wav")
+        self._hydraulic_hop = OneShot("sfx/hydraulics_hop.wav")
         self._slam.set_volume(self.settings.get("airride_volume"))
         self._maybach.set_volume(self.settings.get("maybach_volume"))
+        self._hydraulic.set_volume(self.settings.get("hydraulics_volume"))
+        self._hydraulic_hop.set_volume(self.settings.get("hydraulics_volume"))
         self.settings.subscribe(self._on_settings_changed)
 
     def _on_settings_changed(self, key: str) -> None:
@@ -177,6 +234,9 @@ class SuspensionModule(FeatureModule):
             self._slam.set_volume(self.settings.get("airride_volume"))
         elif key == "maybach_volume":
             self._maybach.set_volume(self.settings.get("maybach_volume"))
+        elif key == "hydraulics_volume":
+            self._hydraulic.set_volume(self.settings.get("hydraulics_volume"))
+            self._hydraulic_hop.set_volume(self.settings.get("hydraulics_volume"))
 
     def _sync_controls(self) -> None:
         stock = self.stock_camber
@@ -202,6 +262,8 @@ class SuspensionModule(FeatureModule):
             ("bounce_low", self._bounce_low),
             ("bounce_high", self._bounce_high),
             ("bounce_speed", self._bounce_speed),
+            ("hydraulics_manual_height", self._hydraulics_manual_height),
+            ("hydraulics_manual_speed", self._hydraulics_manual_speed),
             ("air_camber_front", self._air_camber_front),
             ("air_camber_rear", self._air_camber_rear),
             *zip(camber_keys, camber_values, strict=True),
@@ -220,6 +282,7 @@ class SuspensionModule(FeatureModule):
         for key, state in (
             ("bounce", self._bounce),
             ("bounce_audio", self._bounce_audio),
+            ("hydraulics", self._hydraulics),
             ("camber_mirror", self._camber_mirror),
             ("track_mirror", self._track_mirror),
             ("toe_mirror", self._toe_mirror),
@@ -231,6 +294,7 @@ class SuspensionModule(FeatureModule):
                     row.toggle.set_value(bool(state))
                 except Exception:
                     pass
+
         wheels_panel = self._widgets.get("camber_wheels_panel")
         if wheels_panel is not None:
             wheels_panel.setVisible(not self._camber_mirror)
@@ -263,14 +327,45 @@ class SuspensionModule(FeatureModule):
     def binding(self) -> dict | None:
         return self.settings.binding("suspension.airride")
 
+    def _hydraulics_binding(self, bindings: dict, group: str) -> dict | None:
+        value = bindings.get(f"suspension.hydraulics.{group}")
+        if isinstance(value, dict) and "kind" in value and "code" in value:
+            return value
+        return None
+
     def bindings(self) -> list[dict]:
+        items = [
+            ("front", "Hydraulics Front", "Hop the front axle once, then return to normal."),
+            ("rear", "Hydraulics Back", "Hop the rear axle once, then return to normal."),
+            ("left", "Hydraulics Left", "Hop the left side once, then return to normal."),
+            ("right", "Hydraulics Right", "Hop the right side once, then return to normal."),
+            ("fl", "Hydraulics FL", "Hop the front-left corner once, then return to normal."),
+            ("fr", "Hydraulics FR", "Hop the front-right corner once, then return to normal."),
+            ("rl", "Hydraulics RL", "Hop the rear-left corner once, then return to normal."),
+            ("rr", "Hydraulics RR", "Hop the rear-right corner once, then return to normal."),
+            ("front_down", "Front Down Pose", "Move into the front-down pose."),
+            ("rear_down", "Back Down Pose", "Move into the rear-down pose."),
+            ("left_down", "Left Down Pose", "Move into the left-down pose."),
+            ("right_down", "Right Down Pose", "Move into the right-down pose."),
+            ("all_up", "All Up", "Raise all four wheels and hold."),
+            ("all_down", "All Down", "Lower all four wheels and hold."),
+        ]
         return [
             {
                 "key": "suspension.airride",
                 "label": "Air ride up and down",
                 "description": "Drops the car, or lifts it back to your set height.",
-            }
+            },
+            *[
+                {
+                    "key": f"suspension.hydraulics.{key}",
+                    "label": label,
+                    "description": description,
+                }
+                for key, label, description in items
+            ],
         ]
+
 
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -358,6 +453,15 @@ class SuspensionModule(FeatureModule):
         self.stock_track = curves
 
     def on_car_changed(self, vehicle) -> None:
+        self._cancel_hydraulics_no_restore()
+        if self._bounce:
+            self._bounce = False
+            self._bounce_cancel.set()
+            bounce_thread = self._bounce_thread
+            if bounce_thread is not None and bounce_thread.is_alive():
+                bounce_thread.join(timeout=1.0)
+            self._bounce_thread = None
+            self._maybach.stop()
         self._cancel_ramp()
         self._cancel_camber_ramp()
         self._lowered = False
@@ -366,6 +470,7 @@ class SuspensionModule(FeatureModule):
         self.stock = None
         self._radii = None
         self._camber = [None, None, None, None]
+        self._air_camber_preview = False
         self.stock_camber = None
         self._track = [None, None, None, None]
         self.stock_track = [None, None, None, None]
@@ -393,9 +498,12 @@ class SuspensionModule(FeatureModule):
             self._write_toe()
 
     def on_detach(self) -> None:
-
         self._bounce = False
         self._bounce_cancel.set()
+
+        self._hydraulics = False
+        self._hydraulics_cancel.set()
+
         self._maybach.stop()
         self._cancel_ramp()
         self._cancel_camber_ramp()
@@ -409,6 +517,16 @@ class SuspensionModule(FeatureModule):
         if bounce_thread is not None and bounce_thread.is_alive():
             bounce_thread.join(timeout=1.0)
         self._bounce_thread = None
+
+        self._hydraulics = False
+        self._hydraulics_cancel.set()
+
+        hydraulics_thread = self._hydraulics_thread
+        if hydraulics_thread is not None and hydraulics_thread.is_alive():
+            hydraulics_thread.join(timeout=1.0)
+
+        self._hydraulics_thread = None
+
         self._cancel_ramp()
         self._cancel_camber_ramp()
         vehicle = self.vehicle
@@ -438,6 +556,7 @@ class SuspensionModule(FeatureModule):
         self._rear_percent = 0.0
         self._camber = [None, None, None, None]
         self._air_camber = False
+        self._air_camber_preview = False
         self._air_camber_backup = None
         self._track = [None, None, None, None]
         self._toe = [None, None, None, None]
@@ -446,6 +565,8 @@ class SuspensionModule(FeatureModule):
     def reset_controls(self) -> None:
         if self._bounce:
             self.set_bounce(False)
+        if self._hydraulics:
+            self.set_hydraulics(False)
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
@@ -453,6 +574,7 @@ class SuspensionModule(FeatureModule):
         self._air_camber = False
         self._air_camber_front = CAMBER_AIR_DEFAULT_FRONT
         self._air_camber_rear = CAMBER_AIR_DEFAULT_REAR
+        self._air_camber_preview = False
         self._air_camber_backup = None
         self._camber_curve = list(DEFAULT_CURVE)
         self._cancel_camber_ramp()
@@ -474,6 +596,25 @@ class SuspensionModule(FeatureModule):
             self._check_rear_axle(vehicle)
         if self._edge.pressed(self.binding()):
             self.toggle()
+
+        if self._hydraulics:
+            bindings = self.settings.get("bindings", {}) or {}
+
+            for group in HYDRAULICS_GROUP_KEYS:
+                edge = self._hydraulics_edges[group]
+                if edge.pressed(self._hydraulics_binding(bindings, group)):
+                    self._manual_hydraulics_press(group)
+
+            for pose in HYDRAULICS_DOWN_POSE_KEYS:
+                edge = self._hydraulics_edges[pose]
+                if edge.pressed(self._hydraulics_binding(bindings, pose)):
+                    self._manual_down_pose_press(pose)
+
+            for action in HYDRAULICS_ALL_ACTION_KEYS:
+                edge = self._hydraulics_edges[action]
+                if edge.pressed(self._hydraulics_binding(bindings, action)):
+                    self._manual_all_press(action)
+
         self._reapply_if_rebaked(vehicle)
         self._reapply_camber_if_rebaked(vehicle)
         self._reapply_track_if_rebaked(vehicle)
@@ -481,7 +622,7 @@ class SuspensionModule(FeatureModule):
 
     def _reapply_if_rebaked(self, vehicle) -> None:
         """Re-apply ride height when the game has quietly put stock height back."""
-        if not self.stock or self._ramping or self._bounce:
+        if not self.stock or self._ramping or self._bounce or self._hydraulics:
             return
         if not (self._lowered or self._front_percent or self._rear_percent):
             return
@@ -633,13 +774,20 @@ class SuspensionModule(FeatureModule):
     def _active_camber_target(self) -> list[float | None] | None:
         """The camber `_reapply_camber_if_rebaked` should enforce right now.
 
-        While animating and raised there is nothing to enforce — Camber is reset and
-        greyed out for as long as this runs, so the car is just sitting at stock — and
-        forcing that back every tick would fight the live preview `_set_air_camber_target`
-        writes while dragging the lowered-target sliders.
+        Raised is protected too, exactly like lowered — otherwise a game rebake
+        after the raise ramp finishes can silently leave camber stuck at the
+        lowered angle, with nothing to ever correct it back. The one exception
+        is right after a preview drag on the lowered-target sliders (see
+        `_set_air_camber_target`), which deliberately shows that angle while
+        raised and would otherwise get fought on the very next tick.
         """
-        if self._air_camber and self._lowered:
-            return self._air_camber_target()
+        if self._air_camber:
+            if self._lowered:
+                return self._air_camber_target()
+            if self._air_camber_preview:
+                return None
+            target = self._configured_camber()
+            return target if all(value is not None for value in target) else None
         if any(value is not None for value in self._camber):
             target = self._configured_camber()
             return target if any(value is not None for value in target) else None
@@ -685,6 +833,7 @@ class SuspensionModule(FeatureModule):
         if enabled == self._air_camber:
             return
         self._cancel_camber_ramp()
+        self._air_camber_preview = False
         restore_stock = False
         if enabled:
             # Ride height and Camber become the animation's own raised/lowered targets while
@@ -726,8 +875,10 @@ class SuspensionModule(FeatureModule):
             self._air_camber_rear = float(value)
         # Preview the lowered target directly, whether or not the car is actually lowered
         # right now — every other slider in this app gives immediate feedback, and gating
-        # this on `_lowered` just meant it silently did nothing while raised.
+        # this on `_lowered` just meant it silently did nothing while raised. Mark it as a
+        # preview so `_active_camber_target` doesn't fight it back to stock while raised.
         if self._air_camber and not self._camber_ramping:
+            self._air_camber_preview = not self._lowered
             self._write_camber(self._air_camber_target())
 
     def _set_camber_curve(self, values) -> None:
@@ -861,12 +1012,13 @@ class SuspensionModule(FeatureModule):
     def toggle(self) -> None:
         if not self.stock or self.vehicle is None:
             return
-        if self._bounce:
+        if self._bounce or self._hydraulics:
             return
         start_camber = self.vehicle.camber if self._air_camber else None
         self._cancel_ramp()
         self._cancel_camber_ramp()
         self._lowered = not self._lowered
+        self._air_camber_preview = False
 
         if self._lowered:
             self._slam.play()
@@ -888,6 +1040,8 @@ class SuspensionModule(FeatureModule):
             return
         self._bounce = enabled
         if enabled:
+            if self._hydraulics:
+                self.set_hydraulics(False)
             if not self.stock or self.vehicle is None:
                 self._bounce = False
                 self._controls_dirty = True
@@ -940,7 +1094,7 @@ class SuspensionModule(FeatureModule):
                 if self.vehicle is None or not self.stock:
                     return
                 low, high = sorted((self._bounce_low, self._bounce_high))
-
+                
                 phase += 2.0 * math.pi * self._bounce_speed * interval
                 if phase > 2.0 * math.pi:
                     phase -= 2.0 * math.pi
@@ -953,6 +1107,278 @@ class SuspensionModule(FeatureModule):
                 time.sleep(interval)
         except Exception:
             return
+
+    def _pose_ramp_segment(self, start, end, seconds: float) -> bool:
+        """Smoothly move all four ride-height targets for one pose stage."""
+        if not start or not end or len(start) != len(end):
+            return False
+        seconds = max(0.05, float(seconds))
+        steps = max(1, int(seconds * RAMP_HZ))
+        interval = seconds / steps
+        try:
+            for step in range(steps + 1):
+                if self._cancel.is_set() or self.vehicle is None or not self._hydraulics:
+                    return False
+                fraction = step / steps
+                eased = fraction * fraction * (3.0 - 2.0 * fraction)
+                values = [
+                    origin + (destination - origin) * eased
+                    for origin, destination in zip(start, end, strict=True)
+                ]
+                if not self._write(values):
+                    return False
+                if step < steps:
+                    time.sleep(interval)
+        except Exception:
+            return False
+        return True
+
+    def _set_hydraulics_manual_height(self, value: float) -> None:
+        self._hydraulics_manual_height = max(
+            HYDRAULICS_LIFT_MIN_M,
+            min(HYDRAULICS_LIFT_MAX_M, float(value)),
+        )
+
+    def _set_hydraulics_manual_speed(self, value: float) -> None:
+        self._hydraulics_manual_speed = max(0.01, min(0.20, float(value)))
+
+    def _manual_move_to(self, target: list[float], name: str) -> None:
+        """Perform one user-commanded movement and HOLD the result."""
+        if not self._hydraulics or self.vehicle is None or not self.stock:
+            return
+
+        current = self.vehicle.ride_height or self._baseline()
+        if not current or len(current) < WHEEL_COUNT:
+            return
+
+        self._cancel_ramp()
+        self._cancel.clear()
+
+        # Exactly one sound for exactly one explicit command.
+        self._play_hydraulic_sound(force=True, hop=True)
+
+        self._thread = threading.Thread(
+            target=self._pose_ramp_segment,
+            daemon=True,
+            name=f"neptune-hydraulics-{name}",
+            args=(list(current), list(target), self._hydraulics_manual_speed),
+        )
+        self._thread.start()
+
+    def _manual_pulse_to(
+        self,
+        target: list[float],
+        baseline: list[float],
+        name: str,
+    ) -> None:
+        """Perform one hydraulic hit: move up once, then return to baseline."""
+        if not self._hydraulics or self.vehicle is None or not self.stock:
+            return
+
+        current = self.vehicle.ride_height or baseline
+        if not current or len(current) < WHEEL_COUNT:
+            return
+
+        self._cancel_ramp()
+        self._cancel.clear()
+
+        # The sound is tied to the input edge, not to either half of the motion.
+        self._play_hydraulic_sound(force=True, hop=True)
+
+        self._thread = threading.Thread(
+            target=self._manual_pulse_sequence,
+            daemon=True,
+            name=f"neptune-hydraulics-pulse-{name}",
+            args=(
+                list(current),
+                list(target),
+                list(baseline),
+                self._hydraulics_manual_speed,
+            ),
+        )
+        self._thread.start()
+
+    def _manual_pulse_sequence(
+        self,
+        start: list[float],
+        target: list[float],
+        baseline: list[float],
+        seconds: float,
+    ) -> None:
+        """Move to the selected hydraulic height once, then return to normal."""
+        if not self._pose_ramp_segment(start, target, seconds):
+            return
+        if self._cancel.is_set() or not self._hydraulics:
+            return
+        self._pose_ramp_segment(target, baseline, seconds)
+
+    def _manual_hydraulics_press(self, group: str) -> None:
+        """Hop the selected axle/side/corner once, then return to normal."""
+        if not self._hydraulics or self.vehicle is None or not self.stock:
+            return
+
+        wheels = HYDRAULICS_MANUAL_GROUPS.get(group)
+        if not wheels:
+            return
+
+        baseline = self._baseline()
+        if len(baseline) < WHEEL_COUNT:
+            return
+
+        target = list(baseline)
+        amount = self._hydraulics_manual_height
+        for wheel in wheels:
+            target[wheel] = self._clamp(baseline[wheel] + amount, wheel)
+
+        self._hydraulics_down_pose = None
+        self._manual_pulse_to(target, baseline, f"up-{group}")
+
+    def _manual_down_pose_press(self, pose: str) -> None:
+        """Move once into a static front/back/left/right down pose and HOLD it."""
+        if not self._hydraulics or self.vehicle is None or not self.stock:
+            return
+
+        wheels = HYDRAULICS_DOWN_POSES.get(pose)
+        if not wheels:
+            return
+
+        baseline = self._baseline()
+        if len(baseline) < WHEEL_COUNT:
+            return
+
+        # A pose is a clean static stance: selected wheels down, every other
+        # wheel back at stock. This avoids stacking old poses together.
+        target = list(baseline)
+        amount = self._hydraulics_manual_height
+        for wheel in wheels:
+            target[wheel] = self._clamp(baseline[wheel] - amount, wheel)
+
+        self._hydraulics_down_pose = pose
+        self._manual_move_to(target, pose)
+
+    def _manual_all_press(self, action: str) -> None:
+        """Raise or lower all four wheels once and HOLD the resulting height."""
+        if not self._hydraulics or self.vehicle is None or not self.stock:
+            return
+
+        direction = HYDRAULICS_ALL_ACTIONS.get(action)
+        if direction is None:
+            return
+
+        baseline = self._baseline()
+        if len(baseline) < WHEEL_COUNT:
+            return
+
+        amount = self._hydraulics_manual_height
+        target = [
+            self._clamp(baseline[wheel] + direction * amount, wheel)
+            for wheel in range(WHEEL_COUNT)
+        ]
+
+        self._hydraulics_down_pose = None
+        self._manual_move_to(target, action)
+
+    def _update_hydraulics_visibility(self) -> None:
+        """All hydraulics controls are manual-only and always visible."""
+        for key in (
+            "hydraulics_manual_height",
+            "hydraulics_manual_speed",
+            "hydraulics_bindings_panel",
+        ):
+            widget = self._widgets.get(key)
+            if widget is not None:
+                widget.setVisible(True)
+
+
+    def set_hydraulics(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._hydraulics:
+            return
+
+        if enabled:
+            if not self.stock or self.vehicle is None:
+                self._hydraulics = False
+                self._controls_dirty = True
+                return
+
+            if self._bounce:
+                self.set_bounce(False)
+
+            self._hydraulics = True
+            self._cancel_ramp()
+            self._cancel.clear()
+
+            self._hydraulics_down_pose = None
+            for edge in self._hydraulics_edges.values():
+                edge.reset()
+            # Manual-only: turning Hydraulics on arms the controls but does not
+            # move the suspension or play a sound by itself.
+        else:
+            self._hydraulics = False
+            self._stop_hydraulics()
+
+    def _cancel_hydraulics_no_restore(self) -> None:
+        """Stop any in-flight hydraulics movement without touching ride height or
+        disarming the feature itself; used on a car change.
+
+        Deliberately does NOT set `self._hydraulics = False`. Manual hydraulics
+        doesn't move anything on its own — it only reacts to explicit button
+        presses/binds — so there is nothing unsafe about leaving it armed across
+        a car swap. Forcing it off here used to leave the toggle showing off with
+        no feedback, and re-enabling it during the brief window before the new
+        car's `self.stock` is captured would silently fail and immediately flip
+        back off. Staying armed means it just keeps working once the new car's
+        stock height is captured, with no user action required.
+        """
+        self._hydraulics_cancel.set()
+        thread = self._hydraulics_thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=1.0)
+        self._hydraulics_thread = None
+        self._hydraulics_down_pose = None
+        for edge in self._hydraulics_edges.values():
+            edge.reset()
+
+    def _stop_hydraulics(self) -> None:
+        self._hydraulics_manual_up = [False] * WHEEL_COUNT
+        self._hydraulics_down_pose = None
+        self._hydraulics_cancel.set()
+        thread = self._hydraulics_thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=1.0)
+        self._hydraulics_thread = None
+
+        if self.stock and self.vehicle is not None:
+            current = self.vehicle.ride_height
+            self._cancel_ramp()
+            self._start_ramp(
+                current or self._baseline(),
+                self._target(self._lowered),
+                SETTLE_SECONDS,
+            )
+
+    def _play_hydraulic_sound(self, force: bool = False, hop: bool = False) -> None:
+        """Play one hydraulic sound for an explicit manual action."""
+        now = time.monotonic()
+        cooldown = HYDRAULICS_SOUND_COOLDOWN
+
+        if not force and now - self._hydraulics_last_sound < cooldown:
+            return
+
+        self._hydraulics_last_sound = now
+
+        if hop:
+            self._hydraulic_hop.play()
+        else:
+            self._hydraulic.play()
 
     def _start_ramp(self, start, end, seconds: float, reverse: bool = False) -> None:
         self._cancel.clear()
@@ -1490,10 +1916,167 @@ class SuspensionModule(FeatureModule):
         self._widgets["bounce_speed"] = speed
         bounce_card.add(speed)
 
-        audio_toggle = ToggleRow("Play sound", self._bounce_audio, hint=HINT_BOUNCE_AUDIO)
+        audio_toggle = ToggleRow(
+            "Play sound",
+            self._bounce_audio,
+            hint=HINT_BOUNCE_AUDIO,
+        )
         audio_toggle.toggle.toggled_value.connect(self._set_bounce_audio)
         self._widgets["bounce_audio"] = audio_toggle
         bounce_card.add(audio_toggle)
+
+        hydraulics_card = page.add_card(
+            "Hydraulics",
+            "Fully manual lowrider hydraulics. Nothing moves until you press a control.",
+        )
+
+        hydraulics_toggle = ToggleRow(
+            "Hydraulics",
+            self._hydraulics,
+            hint="Enable the manual controls. Toggling this does not move the suspension or play audio.",
+        )
+        hydraulics_toggle.toggle.toggled_value.connect(self.set_hydraulics)
+        self._widgets["hydraulics"] = hydraulics_toggle
+        hydraulics_card.add(hydraulics_toggle)
+
+        # Row 1: direct up controls.
+        up_panel = QWidget()
+        up_row = QHBoxLayout(up_panel)
+        up_row.setContentsMargins(0, 0, 0, 0)
+        up_row.setSpacing(6)
+
+        for group, label in (
+            ("front", "Front"),
+            ("rear", "Back"),
+            ("left", "Left"),
+            ("right", "Right"),
+            ("fl", "FL"),
+            ("fr", "FR"),
+            ("rl", "RL"),
+            ("rr", "RR"),
+        ):
+            button = Button(label)
+            button.setMinimumWidth(0)
+            button.clicked.connect(
+                lambda _checked=False, g=group: self._manual_hydraulics_press(g)
+            )
+            up_row.addWidget(button, 1)
+
+        hydraulics_card.add(up_panel)
+
+        # Row 2: static poses and whole-car positions.
+        pose_panel = QWidget()
+        pose_row = QHBoxLayout(pose_panel)
+        pose_row.setContentsMargins(0, 0, 0, 0)
+        pose_row.setSpacing(6)
+
+        for pose, label in (
+            ("front_down", "Front Down Pose"),
+            ("rear_down", "Back Down Pose"),
+            ("left_down", "Left Down Pose"),
+            ("right_down", "Right Down Pose"),
+        ):
+            button = Button(label)
+            button.setMinimumWidth(0)
+            button.clicked.connect(
+                lambda _checked=False, p=pose: self._manual_down_pose_press(p)
+            )
+            pose_row.addWidget(button, 1)
+
+        for action, label in (("all_up", "All Up"), ("all_down", "All Down")):
+            button = Button(label)
+            button.setMinimumWidth(0)
+            button.clicked.connect(
+                lambda _checked=False, a=action: self._manual_all_press(a)
+            )
+            pose_row.addWidget(button, 1)
+
+        hydraulics_card.add(pose_panel)
+
+        hydraulics_card.add(
+            SectionHeading(
+                "",
+                "Height controls how far each command moves. Speed controls how long that one movement takes.",
+            )
+        )
+
+        manual_height = SliderRow(
+            "Height",
+            HYDRAULICS_LIFT_MIN_M,
+            HYDRAULICS_LIFT_MAX_M,
+            self._hydraulics_manual_height,
+            step=0.01,
+            decimals=2,
+            unit="m",
+            hint="Distance from stock used by manual up, down-pose and all-up/all-down commands.",
+        )
+        manual_height.changed.connect(self._set_hydraulics_manual_height)
+        self._widgets["hydraulics_manual_height"] = manual_height
+        hydraulics_card.add(manual_height)
+
+        manual_speed = SliderRow(
+            "Speed",
+            0.01,
+            0.20,
+            self._hydraulics_manual_speed,
+            step=0.01,
+            decimals=2,
+            unit="s",
+            hint="Time taken for one manual hydraulic movement. Lower is faster.",
+        )
+        manual_speed.changed.connect(self._set_hydraulics_manual_speed)
+        self._widgets["hydraulics_manual_speed"] = manual_speed
+        hydraulics_card.add(manual_speed)
+
+        hydraulics_card.add(
+            SectionHeading(
+                "",
+                "Bind any manual hydraulics command to a keyboard or controller input.",
+            )
+        )
+
+        bindings_panel = QWidget()
+        bindings_layout = QVBoxLayout(bindings_panel)
+        bindings_layout.setContentsMargins(0, 0, 0, 0)
+        bindings_layout.setSpacing(6)
+
+        for action, label in (
+            ("front", "Front"),
+            ("rear", "Back"),
+            ("left", "Left"),
+            ("right", "Right"),
+            ("fl", "FL"),
+            ("fr", "FR"),
+            ("rl", "RL"),
+            ("rr", "RR"),
+            ("front_down", "Front Down Pose"),
+            ("rear_down", "Back Down Pose"),
+            ("left_down", "Left Down Pose"),
+            ("right_down", "Right Down Pose"),
+            ("all_up", "All Up"),
+            ("all_down", "All Down"),
+        ):
+            binding_key = f"suspension.hydraulics.{action}"
+            bind = BindButton(
+                self.settings.binding(binding_key),
+                settings=self.settings,
+                key=binding_key,
+            )
+            bind.bound.connect(
+                lambda binding, k=binding_key: self.settings.set_binding(k, binding)
+            )
+            bindings_layout.addWidget(
+                FieldRow(
+                    label,
+                    bind,
+                    hint=f"Bind a key or controller input for {label}.",
+                )
+            )
+
+        self._widgets["hydraulics_bindings_panel"] = bindings_panel
+        hydraulics_card.add(bindings_panel)
+
+        self._update_hydraulics_visibility()
 
         live_card = page.add_card("Live")
         stats = StatStrip()
