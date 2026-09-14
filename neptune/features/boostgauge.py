@@ -93,6 +93,10 @@ class BoostGaugeModule(FeatureModule):
         if self._overlay is not None:
             self._overlay.set_vehicle(vehicle)
 
+    def tick_process(self, process) -> None:
+        """Keep the game pid current even when the gauge is hosted by DYNO."""
+        self._process = process
+
     def on_car_changed(self, vehicle) -> None:
         self.vehicle = vehicle
         if self._overlay is not None:

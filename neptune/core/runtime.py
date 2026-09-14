@@ -188,7 +188,10 @@ class Runtime:
             return
 
         vehicle = vehicles[0]
-        identity = vehicle.fingerprint()
+        # The cam controller writes Car.IDLE_SPEED on every frame. That field
+        # remains part of the legacy tune key, but it must not participate in
+        # runtime car detection or the cam waveform looks like a new vehicle.
+        identity = vehicle.identity_fingerprint()
         previous = self._identity
         address = (vehicle.entity, vehicle.car)
         self.vehicle = vehicle

@@ -55,8 +55,10 @@ class Vehicle:
     def fingerprint(self) -> tuple | None:
         """Identity key for this car.
 
-        Samples only fields that no Neptune control ever writes, so applying a
-        tune can never change the identity of the car it was applied to.
+        This is the legacy tune-storage key. It keeps the original shape so
+        existing per-car tune records remain addressable. Runtime car-change
+        detection uses ``identity_fingerprint`` below because the live idle
+        field is now intentionally writable by the cam controller.
         """
         try:
             count = self.curve_count
@@ -71,6 +73,36 @@ class Vehicle:
             return (
                 int(count),
                 int(round(idle)),
+                int(round(scale)),
+                int(aspiration) if aspiration is not None else -1,
+                int(round(torque)) if torque is not None else -1,
+            )
+        except Exception:
+            return None
+
+    def identity_fingerprint(self) -> tuple | None:
+        """Return the runtime identity without mutable live-control fields.
+
+        ``Car.IDLE_SPEED`` used to be read-only and was part of the original
+        fingerprint. Trial B makes that field the cam's live idle target, so
+        sampling it during the one-second rescan would make Neptune announce
+        a new car every time the cam waveform moved. The runtime identity is
+        built from the car's immutable media name and engine/config values
+        instead; none of these are written by Neptune. The curve count is
+        deliberately excluded too: the rev-limit control may extend the
+        live curve while the same car remains loaded.
+        """
+        try:
+            count = self.curve_count
+            if not count or not (MIN_CURVE_POINTS <= count <= MAX_CURVE_POINTS):
+                return None
+            scale = self.rpm_per_index
+            aspiration = self.aspiration
+            torque = self.torque_scale
+            if scale is None:
+                return None
+            return (
+                self.media_name or "",
                 int(round(scale)),
                 int(aspiration) if aspiration is not None else -1,
                 int(round(torque)) if torque is not None else -1,
@@ -157,6 +189,13 @@ class Vehicle:
     def set_rev_ceiling(self, rpm: float) -> bool:
         return self._set_engine_rpm_field(O.EngineModel.MAX_CLAMP, rpm)
 
+    def set_curve_count(self, count: int) -> bool:
+        """Set the number of live torque-curve samples after validation."""
+        count = int(count)
+        if not (MIN_CURVE_POINTS <= count <= MAX_CURVE_POINTS):
+            return False
+        return self.process.set_i32(self.engine + O.EngineModel.CURVE_COUNT, count)
+
     def curve(self) -> list[float]:
         count = self.curve_count
         if not count or not (MIN_CURVE_POINTS <= count <= MAX_CURVE_POINTS):
@@ -164,9 +203,17 @@ class Vehicle:
         return self.process.f32_array(self.engine + O.EngineModel.CURVE, count)
 
     def set_curve(self, values) -> bool:
+        values = list(values)
+        if not (MIN_CURVE_POINTS <= len(values) <= MAX_CURVE_POINTS):
+            return False
         return self.process.set_f32_array(self.engine + O.EngineModel.CURVE, values)
 
     def set_curve_from(self, index: int, values) -> bool:
+        values = list(values)
+        if index < 0 or index + len(values) > MAX_CURVE_POINTS:
+            return False
+        if not values:
+            return True
         return self.process.set_f32_array(self.engine + O.EngineModel.CURVE + index * 4, values)
 
     @property

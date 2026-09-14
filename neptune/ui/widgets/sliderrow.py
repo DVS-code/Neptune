@@ -62,7 +62,10 @@ class SliderRow(QWidget):
         row.addWidget(name)
 
         self._slider = Slider(self._to_position(self._value))
-        self._slider.moved.connect(self._on_slider)
+        # Use QSlider's native signal.  A Python-defined signal on the
+        # QFluentWidgets subclass is not registered reliably by PySide6, which
+        # made every slider drag update visually but never reach its callback.
+        self._slider.valueChanged.connect(self._on_slider_value)
         row.addWidget(self._slider, 1)
 
         self._field = LineEdit()
@@ -104,6 +107,12 @@ class SliderRow(QWidget):
             return
         self._value = value
         self.changed.emit(value)
+
+    def _on_slider_value(self, _value: int) -> None:
+        """Forward a user-driven Qt value change as a normalized position."""
+        if self._slider._syncing:
+            return
+        self._on_slider(self._slider.position())
 
     def _on_field(self) -> None:
         try:

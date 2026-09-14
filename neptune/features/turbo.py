@@ -359,10 +359,11 @@ class TurboModule(FeatureModule):
         self._was_tuned = tuned
 
         live = vehicle.boost_raw
-        if tuned and live is not None:
-            if math.isnan(live) or math.isinf(live) or live < -1.0:
-                self.restore()
-                return
+        if tuned and live is not None and (
+            math.isnan(live) or math.isinf(live) or live < -1.0
+        ):
+            self.restore()
+            return
 
         if tuned:
             self._forget_if_rebaked(vehicle)

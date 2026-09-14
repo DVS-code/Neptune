@@ -13,9 +13,8 @@ from neptune.core import paths
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import Runtime
 from neptune.core.settings import Settings
-from neptune.features.boostgauge import BoostGaugeModule
 from neptune.features.car import CarModule
-from neptune.features.dragy import DragyModule
+from neptune.features.dyno import DynoModule
 from neptune.features.engine import EngineModule
 from neptune.features.presets import PresetsModule
 from neptune.features.settings import SettingsModule
@@ -39,8 +38,7 @@ def build_registry(settings: Settings) -> ModuleRegistry:
 
     registry.register(SuspensionModule(settings))
     registry.register(CarModule(settings))
-    registry.register(DragyModule(settings))
-    registry.register(BoostGaugeModule(settings))
+    registry.register(DynoModule(settings))
     registry.register(TunesModule(registry, settings))
     registry.register(PresetsModule(registry, settings))
     registry.register(SettingsModule(registry, settings))

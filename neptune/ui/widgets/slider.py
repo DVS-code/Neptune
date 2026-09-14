@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, Qt
 from qfluentwidgets import Slider as FluentSlider
 
 from neptune.ui import theme as T
@@ -11,10 +11,14 @@ RESOLUTION = 1000
 
 
 class Slider(FluentSlider):
-    """Reports a position between 0.0 and 1.0."""
+    """A Fluent slider with a normalized position helper.
 
-    moved = Signal(float)
-    released = Signal()
+    QFluentWidgets already exposes the Qt ``valueChanged`` signal.  An earlier
+    wrapper re-emitted that signal through a Python-defined ``moved`` signal,
+    but PySide6 does not register that signal reliably on this QFluent subclass
+    (the meta-object reports the signal after inherited slots).  Consumers now
+    listen to ``valueChanged`` directly.
+    """
 
     def __init__(self, position: float = 0.0, parent=None):
         super().__init__(Qt.Horizontal, parent)
@@ -26,8 +30,6 @@ class Slider(FluentSlider):
         self.setCursor(Qt.PointingHandCursor)
         self._syncing = False
         self.set_position(position)
-        self.valueChanged.connect(self._on_value_changed)
-        self.sliderReleased.connect(self.released.emit)
 
     def position(self) -> float:
         return self.value() / RESOLUTION
@@ -42,11 +44,6 @@ class Slider(FluentSlider):
             self.setValue(value)
         finally:
             self._syncing = False
-
-    def _on_value_changed(self, value: int) -> None:
-        if self._syncing:
-            return
-        self.moved.emit(value / RESOLUTION)
 
     def wheelEvent(self, event) -> None:
         """Only respond to the wheel while focused — e.g. right after a click or drag."""

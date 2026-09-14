@@ -197,7 +197,7 @@ class SettingsModule(FeatureModule):
         about_card = page.add_card("About")
         about = QLabel(
             f"Neptune v{__version__} for Forza Horizon 6 · "
-            f"built for game version {O.GAME_BUILD}\n\n"
+            f"Built for game version: {O.GAME_BUILD}\n\n"
             "Free software under the GNU General Public License v3.0, with no "
             "warranty of any kind. The source code is available at "
             "github.com/DVS-code/Neptune\n\n"

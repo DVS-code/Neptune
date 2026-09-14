@@ -15,11 +15,10 @@ while you drive: torque delivery, boost and ride height.
 
 | Tab | What it does |
 |---|---|
-| **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
+| **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, tune a live RPM/throttle cam profile, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
 | **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, a boost map you can shape per engine speed, and a scramble button for a burst of boost on demand. |
 | **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp, or bounce it between two heights. Manual lowrider hydraulics — hop an axle, a side or a single corner, hold a front/back/left/right down pose, or slam all four up or down, each bindable to its own key. Camber, track width and toe, per wheel or mirrored per axle, with camber optionally shifting to its own values whenever air ride drops. Warns when a car's rear axle or tires won't respond to these. |
-| **Boost Gauge** | A floating boost gauge on top of the game, as a dial, a digital readout or a bar. |
-| **Dragy** | Time your car between two speeds, or over 60 ft, 1/8 mile and 1/4 mile, with an on-screen timer and recent runs. |
+| **DYNO** | New read-only dyno setup with selectable output units, torque/power graph, peak figures, live channels, engine details, an optional Graph/Numbers overlay, Dragy runs and the Boost Gauge in one place. |
 | **Car** | Shows which car you’re currently in, along with a preview of the car and how it’s aspirated.. |
 | **Tunes** | Save your engine and turbo setup per car and switch between saved tunes with one key while driving. |
 | **Presets** | Save and reload whole setups. |
@@ -56,7 +55,7 @@ code-signed. Each release ships a `SHA256SUMS.txt` you can check against.
 pip install -r requirements.txt
 python -m neptune.app
 ```
-> [!WARNING]  
+> [!WARNING]
 > Run your terminal as administrator, or Neptune will not be able to attach.
 
 ## Building a single executable

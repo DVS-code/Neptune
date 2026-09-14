@@ -11,7 +11,7 @@ from neptune.ui.widgets.buttons import DangerButton, PrimaryButton
 from neptune.ui.widgets.card import Banner
 
 CAPTION = (
-    "Presets cover suspension, the boost gauge and Dragy. "
+    "Presets cover suspension and the DYNO page, including its boost gauge and Dragy settings. "
     "Engine and turbo setups are saved per car in the Tunes tab."
 )
 
