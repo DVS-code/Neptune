@@ -36,8 +36,8 @@ CAM_IDLE_LOPE_DEFAULT_HZ = 3.6
 CAM_IDLE_SWING = 0.40
 CAM_TORQUE_DIP = 0.72
 CAM_TORQUE_RECOVERY = 1.05
-CAM_TORQUE_MIN = 0.32
-CAM_TORQUE_MAX = 1.40
+CAM_TORQUE_MIN = 0.55
+CAM_TORQUE_MAX = 1.15
 CAM_WAVE_SHARPNESS = 5.5
 CAM_SECOND_HARMONIC = 0.42
 CAM_TUNING_MIN = 0.0
@@ -49,16 +49,6 @@ CAM_SHARPNESS_MAX = 12.0
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
-
-
-def cam_lope_frequency(aggressiveness: float) -> float:
-    """Return the legacy slider-to-frequency mapping used by older callers.
-
-    New code should pass a custom ``frequency_hz`` to ``configure``. Keeping
-    this helper preserves the old callable for older integrations.
-    """
-    amount = _clamp(aggressiveness)
-    return CAM_IDLE_LOPE_MIN_HZ + amount * (CAM_IDLE_LOPE_MAX_HZ - CAM_IDLE_LOPE_MIN_HZ)
 
 
 def _smoothstep(value: float) -> float:
@@ -159,7 +149,6 @@ class CamController:
         self,
         rpm: float | None,
         throttle: float | None,
-        redline: float | None,
         now: float | None = None,
         idle_rpm: float | None = None,
     ) -> CamFrame:
@@ -169,7 +158,6 @@ class CamController:
 
         throttle = _clamp(throttle if throttle is not None else 0.0)
         rpm = max(0.0, float(rpm or 0.0))
-        redline = max(self.release_rpm + 1.0, float(redline or self.release_rpm * 2.0))
 
         dt = 0.01 if self._last_time is None else max(0.001, min(0.25, now - self._last_time))
         throttle_rate = 0.0
@@ -198,7 +186,7 @@ class CamController:
         idle_target_rpm = None
         if self.enabled:
             # This frequency-controlled fundamental plus second harmonic is
-            # the runtime pattern selected during the live A/B trial. The
+            # the pattern that sounded right when compared in game. The
             # sharper wave at high aggression makes the idle target itself
             # snap between the cam's drop and recovery instead of merely
             # wobbling around stock.
@@ -258,12 +246,12 @@ def apply_cam_shape(
     if len(curve) < 2 or rpm_per_index <= 0.0 or redline <= 0.0:
         return list(curve)
     intensity = _clamp(intensity)
-    torque_pulse = _clamp(torque_pulse, 0.55, 1.15)
+    torque_pulse = _clamp(torque_pulse, CAM_TORQUE_MIN, CAM_TORQUE_MAX)
     if intensity <= 1e-6:
         return list(curve)
 
     low_end = max(1800.0, redline * 0.50)
-    high_start = max(low_end, redline * 0.42)
+    high_start = low_end
     high_end = max(high_start + 1.0, redline * 0.92)
     pulse_end = max(2200.0, min(low_end, redline * 0.46))
     shaped = list(curve)

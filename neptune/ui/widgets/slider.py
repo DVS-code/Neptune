@@ -31,6 +31,11 @@ class Slider(FluentSlider):
         self._syncing = False
         self.set_position(position)
 
+    @property
+    def syncing(self) -> bool:
+        """True while `set_position` moves the slider, so listeners can ignore that change."""
+        return self._syncing
+
     def position(self) -> float:
         return self.value() / RESOLUTION
 

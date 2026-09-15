@@ -11,16 +11,18 @@ from neptune.ui.dynooverlay import DynoOverlay
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import Segmented
 from neptune.ui.widgets.dynograph import DynoGraph
+from neptune.vehicle.vehicle import NM_RPM_TO_HP
 
-NM_RPM_TO_HP = 7127.0
 DYNO_UNITS = ("hp / Nm", "kW / Nm", "hp / lb-ft", "kW / lb-ft")
+NM_TO_LBFT = 0.737562
+HP_TO_KW = 0.7457
 
 HINT_DYNO = (
     "Every number on this page comes from the live car and engine data. "
     "No telemetry setting is required."
 )
 HINT_GRAPH = "Engine output curve. Blue is torque; violet is power."
-HINT_UNITS = "Peak-output display units only; changing this never writes to the car."
+HINT_UNITS = "Units for the graph and peak output; changing this never writes to the car."
 HINT_LIVE = "A live snapshot of the engine and vehicle channels used by the graph and gauge."
 HINT_OVERLAY = "Shows the dyno graph and figures above the game window."
 HINT_OVERLAY_LOCK = "Unlock only to drag the panel; lock it again so clicks pass to the game."
@@ -153,18 +155,22 @@ class DynoModule(DragyModule):
                 nm = max(0.0, float(raw) * scale)
                 torque.append(nm)
                 power.append(nm * rpm / NM_RPM_TO_HP)
-            return torque, power, step, curve
+            return torque, power, step
         except (TypeError, ValueError, OverflowError):
             return None
 
-    def _format_output(self, value: float, kind: str) -> tuple[str, str]:
+    def _output_unit(self, kind: str) -> tuple[float, str]:
+        """(factor from Nm or hp, unit label) for "torque" or "power" in the selected units."""
         if kind == "torque":
-            if self._units.endswith("lb-ft"):
-                return f"{value * 0.737562:.0f}", "lb-ft"
-            return f"{value:.0f}", "Nm"
-        if self._units.startswith("kW"):
-            return f"{value * 0.7457:.0f}", "kW"
-        return f"{value:.0f}", "hp"
+            return (NM_TO_LBFT, "lb-ft") if self._units.endswith("lb-ft") else (1.0, "Nm")
+        return (HP_TO_KW, "kW") if self._units.startswith("kW") else (1.0, "hp")
+
+    def _format_output(self, value: float, kind: str) -> tuple[str, str]:
+        factor, unit = self._output_unit(kind)
+        return f"{value * factor:.0f}", unit
+
+    def _legend_text(self, kind: str) -> str:
+        return f"● {kind.capitalize()}  {self._output_unit(kind)[1]}"
 
     def _set_units(self, value: str) -> None:
         if value in DYNO_UNITS:
@@ -187,10 +193,12 @@ class DynoModule(DragyModule):
         legend = QHBoxLayout()
         legend.setContentsMargins(0, 0, 0, 0)
         legend.setSpacing(16)
-        torque_label = QLabel("● Torque  Nm")
+        torque_label = QLabel(self._legend_text("torque"))
         torque_label.setStyleSheet(f"color: {T.INFO};")
-        power_label = QLabel("● Power  hp")
+        self._dyno_widgets["legend_torque"] = torque_label
+        power_label = QLabel(self._legend_text("power"))
         power_label.setStyleSheet(f"color: {T.ACCENT_BRIGHT};")
+        self._dyno_widgets["legend_power"] = power_label
         legend.addWidget(torque_label)
         legend.addWidget(power_label)
         legend.addStretch(1)
@@ -293,6 +301,10 @@ class DynoModule(DragyModule):
         units = self._dyno_widgets.get("units")
         if units is not None:
             units.set_value(self._units)
+        for key, kind in (("legend_torque", "torque"), ("legend_power", "power")):
+            label = self._dyno_widgets.get(key)
+            if label is not None:
+                label.setText(self._legend_text(kind))
         overlay_mode = self._dyno_widgets.get("overlay_mode")
         if overlay_mode is not None:
             overlay_mode.set_value(self._overlay_mode)
@@ -334,6 +346,8 @@ class DynoModule(DragyModule):
             boost,
             gear,
             status,
+            torque_unit=self._output_unit("torque")[1],
+            power_unit=self._output_unit("power")[1],
         )
 
     def refresh(self, vehicle) -> None:
@@ -350,6 +364,10 @@ class DynoModule(DragyModule):
         setup = self._dyno_widgets.get("setup")
         status = self._dyno_widgets.get("status")
         if graph is None or peaks is None or live is None or setup is None or status is None:
+            return
+        # always_refresh (inherited from Dragy) runs this ~11 times a second on every page.
+        # With the DYNO page hidden and no overlay, nothing shows these reads.
+        if not graph.isVisible() and not self._overlay_enabled:
             return
 
         if vehicle is None:
@@ -373,7 +391,7 @@ class DynoModule(DragyModule):
             )
             return
 
-        torque, power, step, curve = data
+        torque, power, step = data
         rpm = vehicle.rpm
         speed_value, speed_unit = self.settings.speed(vehicle.speed_ms)
         boost_value, boost_unit = self.settings.pressure(vehicle.boost_gauge)
@@ -426,16 +444,26 @@ class DynoModule(DragyModule):
             )
             return
 
+        torque_factor, torque_unit = self._output_unit("torque")
+        power_factor, power_unit = self._output_unit("power")
+        torque_shown = [value * torque_factor for value in torque]
+        power_shown = [value * power_factor for value in power]
         graph.set_data(
-            torque,
-            power,
+            torque_shown,
+            power_shown,
             step,
             rpm,
             vehicle.rev_ceiling,
             self._show_torque,
             self._show_power,
+            torque_unit=torque_unit,
+            power_unit=power_unit,
         )
-        (torque_nm, torque_rpm), (power_hp, power_rpm) = vehicle.peaks(curve)
+        # Same peaks as Vehicle.peaks, from the lists already built (no second turbo read).
+        torque_index = max(range(len(torque)), key=torque.__getitem__)
+        power_index = max(range(len(power)), key=power.__getitem__)
+        torque_nm, torque_rpm = torque[torque_index], torque_index * step
+        power_hp, power_rpm = power[power_index], power_index * step
         torque_value, torque_unit = self._format_output(torque_nm, "torque")
         power_value, power_unit = self._format_output(power_hp, "power")
         peaks.set("torque", torque_value, unit=torque_unit)
@@ -444,8 +472,8 @@ class DynoModule(DragyModule):
         peaks.set("power_rpm", f"{power_rpm:.0f}", unit="rpm")
         status.set(NOTE_DYNO_ACTIVE, "info")
         self._update_dyno_overlay(
-            torque,
-            power,
+            torque_shown,
+            power_shown,
             step,
             rpm,
             vehicle.rev_ceiling,

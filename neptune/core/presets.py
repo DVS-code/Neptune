@@ -66,6 +66,13 @@ def load_preset(name: str, registry: ModuleRegistry) -> tuple[bool, str]:
     if not isinstance(data, dict):
         return False, "That preset file is not valid."
 
+    # Before 1.1.4 the boost gauge was its own module. It now lives inside DYNO, which kept
+    # Dragy's "dragy" key, and would otherwise reset a pre-1.1.4 preset's gauge to defaults.
+    legacy_gauge = data.pop("boostgauge", None)
+    dyno = data.get("dragy")
+    if isinstance(legacy_gauge, dict) and isinstance(dyno, dict):
+        dyno.setdefault("boost_gauge", legacy_gauge)
+
     for key, state in data.items():
         if key in TUNED_MODULES:
             continue

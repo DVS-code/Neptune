@@ -84,7 +84,7 @@ class Vehicle:
         """Return the runtime identity without mutable live-control fields.
 
         ``Car.IDLE_SPEED`` used to be read-only and was part of the original
-        fingerprint. Trial B makes that field the cam's live idle target, so
+        fingerprint. The cam now writes that field as its live idle target, so
         sampling it during the one-second rescan would make Neptune announce
         a new car every time the cam waveform moved. The runtime identity is
         built from the car's immutable media name and engine/config values
@@ -99,7 +99,7 @@ class Vehicle:
             scale = self.rpm_per_index
             aspiration = self.aspiration
             torque = self.torque_scale
-            if scale is None:
+            if scale is None or not self.car_config:
                 return None
             return (
                 self.media_name or "",
@@ -153,6 +153,9 @@ class Vehicle:
     def idle_rpm(self) -> float | None:
         value = self.process.f32(self.car + O.Car.IDLE_SPEED)
         return value * O.RAD_TO_RPM if value is not None else None
+
+    def set_idle_rpm(self, rpm: float) -> bool:
+        return self.process.set_f32(self.car + O.Car.IDLE_SPEED, float(rpm) / O.RAD_TO_RPM)
 
     @property
     def aspiration(self) -> int | None:
@@ -501,18 +504,24 @@ class Vehicle:
         return [height - radius for height, radius in zip(heights, radii, strict=True)]
 
     def _sso_read(self, address: int) -> str | None:
-        """Read one small-string-optimised std::string."""
-        raw = self.process.read(address, 16)
+        """Read one MSVC std::string: inline up to 15 characters, on the heap past that."""
+        S = O.CarConfig
+        raw = self.process.read(address, S.STRING_SIZE)
         if raw is None:
             return None
-        length = self.process.read(address + O.CarConfig.STRING_LENGTH, 8)
-        if length is None:
+        count = struct.unpack_from("<Q", raw, S.STRING_LENGTH)[0]
+        reserved = struct.unpack_from("<Q", raw, S.STRING_RESERVED)[0]
+        if count > reserved or count > S.STRING_MAX_LENGTH:
             return None
-        count = struct.unpack("<Q", length)[0]
-        if count > O.CarConfig.STRING_CAPACITY:
-            return None
+        if reserved <= S.STRING_CAPACITY:
+            text = raw[:count]
+        else:
+            pointer = struct.unpack_from("<Q", raw, 0)[0]
+            text = self.process.read(pointer, count) if count else b""
+            if text is None:
+                return None
         try:
-            return raw[:count].decode("ascii")
+            return text.decode("ascii")
         except UnicodeDecodeError:
             return None
 

@@ -32,6 +32,8 @@ class DynoGraph(QWidget):
         self.redline: float | None = None
         self.show_torque = True
         self.show_power = True
+        self.torque_unit = "Nm"
+        self.power_unit = "hp"
 
     def set_data(
         self,
@@ -42,7 +44,10 @@ class DynoGraph(QWidget):
         redline=None,
         show_torque=True,
         show_power=True,
+        torque_unit="Nm",
+        power_unit="hp",
     ) -> None:
+        """Values arrive already converted to `torque_unit` and `power_unit`."""
         self.torque = [float(value) for value in (torque or [])]
         self.power = [float(value) for value in (power or [])]
         self.rpm_per_index = float(rpm_per_index or 100.0)
@@ -50,6 +55,8 @@ class DynoGraph(QWidget):
         self.redline = float(redline) if redline and redline > 0 else None
         self.show_torque = bool(show_torque)
         self.show_power = bool(show_power)
+        self.torque_unit = torque_unit
+        self.power_unit = power_unit
         wanted = GRAPH_HEIGHT if (self.torque or self.power) else EMPTY_HEIGHT
         if self.height() != wanted:
             self.setFixedHeight(wanted)
@@ -134,8 +141,10 @@ class DynoGraph(QWidget):
                 f"{power:.0f}",
             )
 
-        painter.drawText(QRectF(0, 2, MARGIN_LEFT, 16), Qt.AlignRight, "Nm")
-        painter.drawText(QRectF(plot.right() + 7, 2, MARGIN_RIGHT - 7, 16), Qt.AlignLeft, "hp")
+        painter.drawText(QRectF(0, 2, MARGIN_LEFT, 16), Qt.AlignRight, self.torque_unit)
+        painter.drawText(
+            QRectF(plot.right() + 7, 2, MARGIN_RIGHT - 7, 16), Qt.AlignLeft, self.power_unit
+        )
         painter.drawText(
             QRectF(plot.left(), plot.bottom() + 7, plot.width(), 18),
             Qt.AlignCenter,

@@ -32,7 +32,6 @@ from neptune.features.launchcontrol import (
     LC_DEFAULT_MIN_NORM,
     LaunchControlController,
 )
-from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
@@ -57,6 +56,7 @@ CAM_AGGRESSIVENESS_MAX = 1.0
 CAM_RELEASE_RPM_MIN = 1500
 CAM_RELEASE_RPM_MAX = 8000
 CAM_WRITE_INTERVAL = 0.03
+CAM_IDLE_MATCH_RPM = 0.5
 
 LC_UI_MIN = 0.0
 LC_UI_MAX = 100.0
@@ -181,7 +181,6 @@ class EngineModule(FeatureModule):
         self.settings = settings
 
         self.stock_curve: list[float] = []
-        self.stock_curve_count: int | None = None
         self.stock_ceiling: float | None = None
         self.stock_redline: float | None = None
 
@@ -212,8 +211,8 @@ class EngineModule(FeatureModule):
         self._cam_last_write = 0.0
         self._cam_last_curve: list[float] | None = None
         self._cam_frame = None
-        self._cam_idle_address: int | None = None
         self._cam_idle_stock_rpm: float | None = None
+        self._cam_idle_written: float | None = None
 
         self._armed = False
         self._engaged = False
@@ -293,19 +292,15 @@ class EngineModule(FeatureModule):
         self._cam_last_write = 0.0
         self._cam_last_curve = None
         self._cam_frame = None
-        self._cam_idle_address = None
         self._cam_idle_stock_rpm = None
+        self._cam_idle_written = None
 
         if vehicle is None:
             return
         self.stock_curve = vehicle.curve()
-        self.stock_curve_count = len(self.stock_curve) or vehicle.curve_count
-        # Trial B proved this car-level runtime copy is the live idle-control
-        # input; the game mirrors it into the engine model field.
-        self._cam_idle_address = vehicle.car + O.Car.IDLE_SPEED
-        idle_value = vehicle.process.f32(self._cam_idle_address)
-        if idle_value is not None:
-            self._cam_idle_stock_rpm = idle_value * O.RAD_TO_RPM
+        # Validated in game: this car-level field is the live idle-control input, and the
+        # game mirrors it into the engine model field.
+        self._cam_idle_stock_rpm = vehicle.idle_rpm
         if self._rev_limit is None:
             self.stock_ceiling = vehicle.rev_ceiling
             self.stock_redline = vehicle.redline
@@ -327,10 +322,14 @@ class EngineModule(FeatureModule):
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
+        if self._cam_idle_stock_rpm is None:
+            self._cam_idle_stock_rpm = vehicle.idle_rpm
         if self._curve_is_tuned():
             self._reapply_curve_state()
 
     def on_detach(self) -> None:
+        # The idle stock and last cam write are kept: a reload is the same car, and the
+        # restore guard needs both to tell whether the game rebuilt the idle field.
         self.vehicle = None
         self._engaged = False
         self._ready = False
@@ -339,10 +338,12 @@ class EngineModule(FeatureModule):
         self._cam.reset()
         self._cam_last_curve = None
         self._cam_frame = None
-        self._cam_idle_address = None
-        self._cam_idle_stock_rpm = None
-        self._launch_control.clear()
-        self._process = None
+        # Launch control is process-wide, not per car: forget it only with the process,
+        # or its stock values would be re-read while still holding the custom ones.
+        process = self._launch_control.process
+        if process is None or not process.alive:
+            self._launch_control.clear()
+            self._process = None
 
     def restore(self) -> None:
         vehicle = self.vehicle
@@ -359,8 +360,6 @@ class EngineModule(FeatureModule):
         self._cam.reset()
         self._cam_last_curve = None
         self._cam_frame = None
-        self._cam_idle_address = None
-        self._cam_idle_stock_rpm = None
         self._lc_enabled = False
         self._launch_control.set_enabled(False)
         self._controls_dirty = True
@@ -424,16 +423,20 @@ class EngineModule(FeatureModule):
             now = time.monotonic()
             if now - self._last_reapply >= REAPPLY_INTERVAL:
                 self._last_reapply = now
-                self._reapply_curve_state()
+                cam_live = self._cam_last_curve is not None
+                if cam_live and now - self._cam_last_write < REAPPLY_INTERVAL:
+                    # The cam rewrites the whole curve every few frames already. Writing the
+                    # plain curve under it here would drop the cam for up to one write interval.
+                    self._apply_rev_ceiling()
+                else:
+                    self._reapply_curve_state()
 
         if self._pending_edits and not self._engaged:
             pending = self._pending_edits
             self._pending_edits = {}
             for start, values in _contiguous_runs(pending):
                 vehicle.set_curve_from(start, values)
-            graph = self._widgets.get("graph")
-            if graph is not None and graph.live:
-                self._custom_curve = list(graph.live)
+            self._custom_curve = self._curve_with_edits(pending)
 
         launch_owns_tick = self._launch_armed and self._tick_launch(vehicle)
         self._tick_cam(vehicle)
@@ -474,6 +477,8 @@ class EngineModule(FeatureModule):
             if self._launch_engaged:
                 self._launch_engaged = False
                 self._start_launch_handoff(vehicle)
+                if not self._launch_handoff_active() and self._turbo is not None:
+                    self._turbo.reset_ramp()
             if self._launch_handoff_active():
                 if self._turbo is not None:
                     self._turbo.ramp_turbine()
@@ -514,6 +519,13 @@ class EngineModule(FeatureModule):
         return now < self._launch_handoff_until
 
     def _cancel_launch_handoff(self) -> None:
+        """End a pending handoff. A no-op otherwise.
+
+        ⚠️ `_tick_launch` calls this on every tick the control is up. Resetting the turbine ramp
+        unconditionally here re-zeroed anti-lag's own ramp each tick, so it never built boost.
+        """
+        if self._launch_handoff_target_rpm is None:
+            return
         self._launch_handoff_until = 0.0
         self._launch_handoff_target_rpm = None
         if self._turbo is not None:
@@ -522,6 +534,8 @@ class EngineModule(FeatureModule):
     def _on_launch_armed(self, enabled: bool) -> None:
         self._launch_armed = bool(enabled)
         if not self._launch_armed:
+            if self._launch_engaged and self._turbo is not None:
+                self._turbo.reset_ramp()
             self._launch_engaged = False
             self._cancel_launch_handoff()
 
@@ -544,7 +558,7 @@ class EngineModule(FeatureModule):
         self._lc_user_configured = True
         self._lc_min_norm = max(LC_UI_MIN, min(0.99, float(value) / LC_UI_MAX))
         if self._lc_max_norm <= self._lc_min_norm:
-            self._lc_max_norm = min(LC_UI_MAX / LC_UI_MAX, self._lc_min_norm + 0.01)
+            self._lc_max_norm = min(1.0, self._lc_min_norm + 0.01)
             slider = self._widgets.get("lc_max_norm")
             if slider is not None:
                 slider.set_value(self._lc_max_norm * LC_UI_MAX)
@@ -734,19 +748,35 @@ class EngineModule(FeatureModule):
             base = body + [self.stock_curve[-1]]
         return self._extend_curve_for_rev_limit(base)
 
+    def _curve_with_edits(self, edits: dict[int, float]) -> list[float]:
+        """The user's curve with graph point edits folded in.
+
+        ⚠️ Built from `_curve_without_cam`, never from the graph's live samples: while the cam
+        or the launch handoff is writing, those samples carry that frame's modulation, and
+        saving them would bake it into the custom curve for good.
+        """
+        curve = self._curve_without_cam()
+        limit = len(curve) - 1
+        for index, value in edits.items():
+            if 0 <= index < limit:
+                curve[index] = value
+        return curve
+
     def _restore_cam_idle(self) -> None:
-        """Return the live car idle target to the value captured on attach."""
+        """Return the live car idle target to the value captured on attach.
+
+        ⚠️ Only when the field still holds the cam's last write. Anything else means the game
+        rebuilt it (a reload, or a different car in the same memory), and writing this car's
+        stock idle there would hand it to whatever lives there now.
+        """
         vehicle = self.vehicle
-        if (
-            vehicle is None
-            or self._cam_idle_address is None
-            or self._cam_idle_stock_rpm is None
-        ):
+        written, self._cam_idle_written = self._cam_idle_written, None
+        if vehicle is None or written is None or self._cam_idle_stock_rpm is None:
             return
-        vehicle.process.set_f32(
-            self._cam_idle_address,
-            self._cam_idle_stock_rpm / O.RAD_TO_RPM,
-        )
+        current = vehicle.idle_rpm
+        if current is None or abs(current - written) > CAM_IDLE_MATCH_RPM:
+            return
+        vehicle.set_idle_rpm(self._cam_idle_stock_rpm)
 
     def _tick_cam(self, vehicle) -> None:
         """Apply the reversible cam overlay at a modest write rate.
@@ -758,7 +788,12 @@ class EngineModule(FeatureModule):
         schema metadata, not a proven player-car scalar.
         """
         handoff_active = self._launch_handoff_active()
-        if not self._cam_enabled and self._cam_last_curve is None and not handoff_active:
+        if (
+            not self._cam_enabled
+            and self._cam_last_curve is None
+            and self._cam_idle_written is None
+            and not handoff_active
+        ):
             return
         if self._engaged:
             return
@@ -781,20 +816,16 @@ class EngineModule(FeatureModule):
             release_rpm=self._cam_release_rpm,
         )
         redline = vehicle.rev_ceiling or self.stock_redline or self._cam_release_rpm * 2.0
-        self._cam_frame = self._cam.update(
-            rpm,
-            throttle,
-            redline,
-            idle_rpm=self._cam_idle_stock_rpm,
-        )
+        self._cam_frame = self._cam.update(rpm, throttle, idle_rpm=self._cam_idle_stock_rpm)
         now = time.monotonic()
 
-        if self._cam_enabled and self._cam_frame.idle_target_rpm is not None:
-            if self._cam_idle_address is not None:
-                vehicle.process.set_f32(
-                    self._cam_idle_address,
-                    self._cam_frame.idle_target_rpm / O.RAD_TO_RPM,
-                )
+        target_idle = self._cam_frame.idle_target_rpm
+        if self._cam_enabled and target_idle is not None:
+            # Past 25% throttle the target sits still; skip rewriting an unchanged value.
+            written = self._cam_idle_written
+            changed = written is None or abs(target_idle - written) > CAM_IDLE_MATCH_RPM
+            if changed and vehicle.set_idle_rpm(target_idle):
+                self._cam_idle_written = target_idle
         elif not self._cam_enabled:
             self._restore_cam_idle()
 
@@ -963,11 +994,12 @@ class EngineModule(FeatureModule):
     def _commit_curve(self) -> None:
         vehicle = self.vehicle
         graph = self._widgets.get("graph")
-        if vehicle is None or graph is None or not graph.live or self._engaged:
+        if vehicle is None or graph is None or not self.stock_curve or self._engaged:
             return
-        self._write_curve(list(graph.live))
-        self._custom_curve = list(graph.live)
-        self._pending_edits.clear()
+        pending = self._pending_edits
+        self._pending_edits = {}
+        self._custom_curve = self._curve_with_edits(pending)
+        self._write_curve(self._curve_without_cam())
 
     def _reset_curve(self) -> None:
         vehicle = self.vehicle
@@ -1334,6 +1366,8 @@ class EngineModule(FeatureModule):
             return
 
         live_curve = vehicle.curve()
+        if self._cam_last_curve is not None:
+            live_curve = self._curve_without_cam() or live_curve
         graph.set_data(
             self.stock_curve,
             live_curve,

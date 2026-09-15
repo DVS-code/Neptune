@@ -203,6 +203,9 @@ class CarConfig:
 
     STRING_CAPACITY = 15
     STRING_LENGTH = 0x10
+    STRING_RESERVED = 0x18
+    STRING_SIZE = 0x20
+    STRING_MAX_LENGTH = 255
 
 
 class Config:

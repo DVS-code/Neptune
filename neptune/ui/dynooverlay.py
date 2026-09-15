@@ -107,6 +107,8 @@ class DynoOverlay(QWidget):
         boost,
         gear,
         status,
+        torque_unit="Nm",
+        power_unit="hp",
     ) -> None:
         self._graph.set_data(
             torque,
@@ -116,6 +118,8 @@ class DynoOverlay(QWidget):
             redline,
             show_torque,
             show_power,
+            torque_unit=torque_unit,
+            power_unit=power_unit,
         )
         self._graph.setFixedHeight(GRAPH_HEIGHT)
         self._rpm = f"{float(rpm):.0f}" if rpm is not None else "--"

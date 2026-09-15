@@ -2256,7 +2256,7 @@ class SuspensionModule(FeatureModule):
         self._drop_percent = _percent("drop", DROP_PERCENT_DEFAULT, 0.0, LOWER_PERCENT_MAX)
         self._floor_percent = _percent("floor", DEFAULT_FLOOR_PERCENT, 0.0, 100.0)
         self._ramp_seconds = _number("ramp_seconds", DEFAULT_RAMP_SECONDS, 0.3, 6.0)
-        self._airride_enabled = bool(data.get("airride_enabled", True))
+        airride_enabled = bool(data.get("airride_enabled", True))
         self._edge.reset()
 
         sequence = data.get("sequence")
@@ -2306,5 +2306,9 @@ class SuspensionModule(FeatureModule):
         self._toe_mirror = bool(data.get("toe_mirror", True))
         if any(value is not None for value in self._toe):
             self._write_toe()
+
+        # Last, once heights and camber are loaded: disabling air ride while the car sits
+        # dropped has to lift it, or it stays down with the drop control locked.
+        self.set_airride_enabled(airride_enabled)
 
         self._controls_dirty = True
