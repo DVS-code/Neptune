@@ -46,8 +46,8 @@ class LaunchControlAddresses:
 def resolve_launch_control(process: Process) -> LaunchControlAddresses:
     """Find the module-backed launch block in the current executable image.
 
-    The old handoff recorded fixed RVAs, but the live executable can move the
-    block between builds. Restricting the search to the main module avoids the
+    Fixed RVAs break whenever a game update moves the block, so it is found
+    by signature instead. Restricting the search to the main module avoids the
     unrelated low-memory mirror and gives the physics reader the copy it uses.
     """
 
@@ -114,10 +114,14 @@ class LaunchControlController:
     def attach(self, process: Process) -> bool:
         """Resolve and capture stock values for a newly attached process."""
 
-        if self.process is not None and self.process.pid == process.pid and self.ready:
-            return True
-        if self.process is not None and self.process.pid == process.pid and self.error is not None:
-            return False
+        if self.process is not None and self.process.pid == process.pid:
+            # Same game: keep the stock values captured first. After a detach the runtime
+            # hands over a new handle and closes the old one, so always take the new one.
+            self.process = process
+            if self.ready:
+                return True
+            if self.error is not None:
+                return False
 
         self.restore()
         self.clear()
@@ -167,7 +171,9 @@ class LaunchControlController:
         return self.apply()
 
     def tick(self, now: float | None = None) -> bool:
-        if not self.enabled or not self.ready:
+        # After a failed write, wait for the user to re-enable or move a slider instead of
+        # retrying the write and the restore on every frame.
+        if not self.enabled or not self.ready or self.error is not None:
             return False
         now = time.monotonic() if now is None else float(now)
         if now - self._last_write < LC_REAPPLY_SECONDS:

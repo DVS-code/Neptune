@@ -110,7 +110,7 @@ class SliderRow(QWidget):
 
     def _on_slider_value(self, _value: int) -> None:
         """Forward a user-driven Qt value change as a normalized position."""
-        if self._slider._syncing:
+        if self._slider.syncing:
             return
         self._on_slider(self._slider.position())
 
