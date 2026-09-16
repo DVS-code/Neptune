@@ -1,34 +1,30 @@
-"""The DYNO panel floating over the game."""
+"""A small capture-status panel that follows the game window."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from neptune.ui.gamewindow import GameWindowTracker
-from neptune.ui.widgets.dynograph import DynoGraph
 
-FRAME_MS = 90
+FRAME_MS = 120
 SYNC_MS = 250
-
-WIDTH = 500
-GRAPH_HEIGHT = 286
-HEIGHT_GRAPH = 372
-HEIGHT_NUMBERS = 146
-DEFAULT_POSITION = (0.04, 0.10)
+WIDTH = 360
+HEIGHT = 132
+DEFAULT_POSITION = (0.04, 0.72)
 RADIUS = 12
 
-BACKDROP = QColor(18, 20, 24, 228)
+BACKDROP = QColor(18, 20, 24, 232)
 BORDER = QColor(255, 255, 255, 34)
 TEXT = QColor(238, 240, 245)
 MUTED = QColor(150, 156, 168)
 LIVE = QColor(120, 214, 255)
-POWER = QColor(190, 135, 255)
+OK = QColor(120, 224, 162)
 
 
-class DynoOverlay(QWidget):
-    """A draggable, click-through-by-default dyno graph and number readout."""
+class LogOverlay(QWidget):
+    """A draggable, click-through-by-default log capture status overlay."""
 
     def __init__(self, parent=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
@@ -36,45 +32,25 @@ class DynoOverlay(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setMouseTracking(True)
+        self.resize(WIDTH, HEIGHT)
 
         self._tracker: GameWindowTracker | None = None
-        self._vehicle = None
         self._position = DEFAULT_POSITION
-        self._mode = "Graph"
         self._locked = True
         self._drag_origin: QPoint | None = None
         self._on_moved = None
-
-        self._graph = DynoGraph(self)
-        self._graph.setFixedHeight(GRAPH_HEIGHT)
-        self._rpm = "--"
-        self._torque = "--"
-        self._power = "--"
-        self._boost = "--"
-        self._gear = "--"
-        self._status = "Attach to the game and load a car"
+        self._test = "No log armed"
+        self._state = "idle"
+        self._samples = 0
+        self._units = "hp / Nm | km/h | psi"
+        self._status = "Choose Generate Log in Neptune"
 
         self._frames = QTimer(self)
         self._frames.setInterval(FRAME_MS)
         self._frames.timeout.connect(self.update)
-
         self._sync_timer = QTimer(self)
         self._sync_timer.setInterval(SYNC_MS)
         self._sync_timer.timeout.connect(self._sync)
-
-        self._resize_for_mode()
-
-    def set_vehicle(self, vehicle) -> None:
-        self._vehicle = vehicle
-
-    def set_mode(self, mode: str) -> None:
-        self._mode = mode if mode in ("Graph", "Numbers") else "Graph"
-        self._resize_for_mode()
-        self._reposition()
-        self.update()
-
-    def set_units(self, torque_unit: str, power_unit: str) -> None:
-        self._graph.set_units(torque_unit, power_unit)
 
     def set_position(self, relative_x: float, relative_y: float) -> None:
         self._position = (
@@ -96,37 +72,19 @@ class DynoOverlay(QWidget):
             self._tracker.set_click_through(self._locked)
         self.setCursor(QCursor(Qt.ArrowCursor if self._locked else Qt.OpenHandCursor))
 
-    def update_values(
+    def update_capture(
         self,
-        torque,
-        power,
-        rpm_per_index,
-        rpm,
-        redline,
-        show_torque,
-        show_power,
-        peak_torque,
-        peak_power,
-        boost,
-        gear,
-        status,
+        test_type: str,
+        state: str,
+        samples: int,
+        units: str,
+        status: str,
     ) -> None:
-        self._graph.set_data(
-            torque,
-            power,
-            rpm_per_index,
-            rpm,
-            redline,
-            show_torque,
-            show_power,
-        )
-        self._graph.setFixedHeight(GRAPH_HEIGHT)
-        self._rpm = f"{float(rpm):.0f}" if rpm is not None else "--"
-        self._torque = peak_torque or "--"
-        self._power = peak_power or "--"
-        self._boost = boost or "--"
-        self._gear = gear or "--"
-        self._status = status or "Waiting for dyno data"
+        self._test = test_type or "No log armed"
+        self._state = state or "idle"
+        self._samples = max(0, int(samples or 0))
+        self._units = units or self._units
+        self._status = status or "Waiting for capture"
         self.update()
 
     def start(self, pid: int | None) -> None:
@@ -147,18 +105,10 @@ class DynoOverlay(QWidget):
             self._tracker = None
         self.hide()
 
-    def _resize_for_mode(self) -> None:
-        self.resize(WIDTH, HEIGHT_GRAPH if self._mode == "Graph" else HEIGHT_NUMBERS)
-        self._graph.setVisible(self._mode == "Graph")
-        if self._mode == "Graph":
-            self._graph.setGeometry(10, 36, WIDTH - 20, GRAPH_HEIGHT)
-
     def _reposition(self) -> None:
         if self._tracker is None:
             return
-        placed = self._tracker.anchor(
-            self._position[0], self._position[1], self.width(), self.height()
-        )
+        placed = self._tracker.anchor(self._position[0], self._position[1], WIDTH, HEIGHT)
         if placed is not None:
             self.move(placed[0], placed[1])
 
@@ -195,8 +145,8 @@ class DynoOverlay(QWidget):
         bounds = self._tracker.rect
         if not bounds.valid:
             return
-        span_x = max(1, bounds.width - self.width())
-        span_y = max(1, bounds.height - self.height())
+        span_x = max(1, bounds.width - WIDTH)
+        span_y = max(1, bounds.height - HEIGHT)
         self._position = (
             max(0.0, min(1.0, (self.x() - bounds.x) / span_x)),
             max(0.0, min(1.0, (self.y() - bounds.y) / span_y)),
@@ -208,43 +158,26 @@ class DynoOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, WIDTH, self.height()), RADIUS, RADIUS)
+        path.addRoundedRect(QRectF(0, 0, WIDTH, HEIGHT), RADIUS, RADIUS)
         painter.fillPath(path, BACKDROP)
-        painter.setPen(BORDER)
+        painter.setPen(QPen(BORDER, 1))
         painter.drawPath(path)
 
         painter.setPen(TEXT)
         painter.setFont(QFont("Segoe UI", 10, QFont.DemiBold))
-        painter.drawText(16, 23, "DYNO")
-        if self._mode == "Numbers":
-            self._draw_numbers(painter)
-            return
+        painter.drawText(16, 23, "NEPTUNE LOG")
 
-        painter.setPen(MUTED)
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.drawText(16, 345, f"RPM {self._rpm}")
+        state_colour = OK if self._state in ("armed", "running", "done") else MUTED
+        painter.setPen(state_colour)
+        painter.setFont(QFont("Segoe UI", 10, QFont.DemiBold))
+        painter.drawText(WIDTH - 96, 23, self._state.upper())
+
         painter.setPen(LIVE)
-        painter.drawText(118, 345, f"Torque {self._torque}")
-        painter.setPen(POWER)
-        painter.drawText(270, 345, f"Power {self._power}")
-        painter.setPen(MUTED)
-        painter.drawText(16, 362, f"Boost {self._boost}    Gear {self._gear}")
-        painter.drawText(220, 362, self._status[:34])
-
-    def _draw_numbers(self, painter: QPainter) -> None:
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.setPen(MUTED)
-        painter.drawText(18, 56, "RPM")
-        painter.drawText(174, 56, "PEAK TORQUE")
-        painter.drawText(348, 56, "PEAK POWER")
-        painter.setFont(QFont("Segoe UI", 22, QFont.DemiBold))
+        painter.setFont(QFont("Segoe UI", 11, QFont.DemiBold))
+        painter.drawText(16, 50, self._test[:42])
         painter.setPen(TEXT)
-        painter.drawText(18, 84, self._rpm)
-        painter.setPen(LIVE)
-        painter.drawText(174, 84, self._torque)
-        painter.setPen(POWER)
-        painter.drawText(348, 84, self._power)
         painter.setFont(QFont("Segoe UI", 9))
+        painter.drawText(16, 72, f"{self._samples:,} samples  ·  {self._units}")
         painter.setPen(MUTED)
-        painter.drawText(18, 117, f"Boost {self._boost}    Gear {self._gear}")
-        painter.drawText(18, 135, self._status[:68])
+        painter.drawText(16, 96, self._status[:55])
+        painter.drawText(16, 117, "Use Generate Log in Neptune to arm or finish")

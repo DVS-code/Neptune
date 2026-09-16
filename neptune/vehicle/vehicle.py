@@ -91,6 +91,9 @@ class Vehicle:
         instead; none of these are written by Neptune. The curve count is
         deliberately excluded too: the rev-limit control may extend the
         live curve while the same car remains loaded.
+
+        No customization record yet (still loading) answers None rather than an empty
+        name, or one unreadable scan would look like a different car and reset every tune.
         """
         try:
             count = self.curve_count
@@ -116,9 +119,7 @@ class Vehicle:
         if rpm is None or not (-50.0 <= rpm <= 60000.0):
             return False
         redline = self.max_rpm
-        if redline is not None and not (0.0 <= redline <= 60000.0):
-            return False
-        return True
+        return redline is None or 0.0 <= redline <= 60000.0
 
     def can_tune_curve(self) -> bool:
         """True when the torque curve is safe to write."""
@@ -130,9 +131,7 @@ class Vehicle:
             return False
         engine_rpm = self.engine_speed_rpm
         car_rpm = self.rpm
-        if engine_rpm is None or car_rpm is None or abs(engine_rpm - car_rpm) > 1.0:
-            return False
-        return True
+        return engine_rpm is not None and car_rpm is not None and abs(engine_rpm - car_rpm) <= 1.0
 
     @property
     def rpm(self) -> float | None:
@@ -471,7 +470,7 @@ class Vehicle:
         rl = self.track_curve(3)
         if not rr or not rl or len(rr) != len(rl):
             return None
-        mirrored = sum(1 for a, b in zip(rr, rl) if a * b < 0)
+        mirrored = sum(1 for a, b in zip(rr, rl, strict=True) if a * b < 0)
         if mirrored >= len(rr) * 0.9:
             return False
         if mirrored <= len(rr) * 0.1:
@@ -504,7 +503,11 @@ class Vehicle:
         return [height - radius for height, radius in zip(heights, radii, strict=True)]
 
     def _sso_read(self, address: int) -> str | None:
-        """Read one MSVC std::string: inline up to 15 characters, on the heap past that."""
+        """Read one MSVC std::string: inline up to 15 characters, on the heap past that.
+
+        Where the text lives follows the capacity, not the length: a string that grew past the
+        buffer and then shrank keeps a heap pointer in the buffer.
+        """
         S = O.CarConfig
         raw = self.process.read(address, S.STRING_SIZE)
         if raw is None:
@@ -537,6 +540,12 @@ class Vehicle:
         if not record:
             return None
         return self._sso_read(record + O.CarConfig.MEDIA_NAME)
+
+    @property
+    def car_id(self) -> int | None:
+        """The verified Data_Car ordinal from the live customization record."""
+        record = self.car_config
+        return self.process.i32(record + O.CarConfig.CAR_ID) if record else None
 
     @property
     def redline(self) -> float | None:
@@ -579,7 +588,7 @@ class Vehicle:
         need: without it the estimate is the bare engine curve and reads far too low on any
         boosted car.
 
-        ⚠️ Naturally aspirated cars must read exactly 1.0 rather than whatever happens to
+        Naturally aspirated cars must read exactly 1.0 rather than whatever happens to
         sit in the field, or a car with no turbo would have its estimate scaled by noise.
         """
         block = self.turbo_block()
@@ -607,7 +616,7 @@ class Vehicle:
         away the magnitude entirely and left `torque_scale` standing in for it. That is why
         a boosted car read ~3.8x too low.
 
-        ⚠️ `torque_scale` (`config-0x0C`) is NOT part of this product. It reads 236.2 on
+        `torque_scale` (`config-0x0C`) is NOT part of this product. It reads 236.2 on
         the validation car where the true multiplier is 176.1; using it is what produced
         the wrong answer. It stays only in `fingerprint()`, where it identifies a car
         rather than scaling anything.

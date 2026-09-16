@@ -24,6 +24,7 @@ HINT_HYDRAULIC_VOLUME = "The hydraulic whirr when hydraulics engage."
 HINT_AUTO_ATTACH = "Connect to Forza Horizon 6 automatically when Neptune starts."
 HINT_RESTORE = "Put every change back to stock when Neptune closes."
 HINT_UPDATES = "Look for a newer Neptune when the tool starts."
+HINT_ASSISTANT = "Use captured log evidence to suggest changes. Neptune never modifies a tune silently."
 
 ISSUES_URL = "https://github.com/DVS-code/Neptune/issues"
 
@@ -150,6 +151,16 @@ class SettingsModule(FeatureModule):
         )
         updates.toggle.toggled_value.connect(self._set_check_for_updates)
         startup_card.add(updates)
+
+        assistant = ToggleRow(
+            "Tuning Assistant",
+            bool(self.settings.get("tuning_assistant")),
+            hint=HINT_ASSISTANT,
+        )
+        assistant.toggle.toggled_value.connect(
+            lambda value: self.settings.set("tuning_assistant", bool(value))
+        )
+        startup_card.add(assistant)
 
         check_button = Button("Check for updates now")
         check_button.clicked.connect(self._check_now)

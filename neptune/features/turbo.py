@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
@@ -13,7 +13,7 @@ from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.boostmap import COLUMNS as MAP_COLUMNS
 from neptune.ui.widgets.boostmap import BoostMap, multiplier_at
-from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
+from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
 from neptune.ui.widgets.controls import BindButton
 from neptune.ui.widgets.sliderrow import SliderRow
 
@@ -108,6 +108,8 @@ class TurboModule(FeatureModule):
         self._gear_count = DEFAULT_GEARS
         self._controls_dirty = False
         self._widgets: dict = {}
+        self._map_dialog: QDialog | None = None
+        self._map_workspace = None
 
     def _is_tuned(self) -> bool:
 
@@ -193,6 +195,18 @@ class TurboModule(FeatureModule):
     def on_detach(self) -> None:
         self.vehicle = None
         self._lag_value = None
+
+    def needs_refresh(self) -> bool:
+        # The Boost Map window shows live cells while any page is selected.
+        return self._map_workspace is not None
+
+    def shutdown(self) -> None:
+        super().shutdown()
+        if self._map_dialog is not None:
+            self._map_dialog.close()
+            self._map_dialog.deleteLater()
+            self._map_dialog = None
+            self._map_workspace = None
 
     def _write_stock(self, vehicle) -> None:
         """Put the car's own boost values back, leaving the user's settings alone.
@@ -510,9 +524,49 @@ class TurboModule(FeatureModule):
             widget = self._widgets.get(key)
             if widget is not None:
                 widget.setVisible(bool(enabled))
+        open_button = self._widgets.get("open_map")
+        if open_button is not None:
+            open_button.setVisible(bool(enabled))
 
         if not enabled:
             self._restore_scale()
+
+    def _open_map_workspace(self) -> None:
+        if not self._map_enabled:
+            return
+        if self._map_dialog is None:
+            from neptune.ui.boostmapworkspace import BoostMapWorkspace
+
+            self._map_dialog = QDialog()
+            self._map_dialog.setWindowTitle("Boost Map 2.0")
+            self._map_dialog.resize(980, 620)
+            self._map_workspace = BoostMapWorkspace(
+                self._map_points, self._map_rows, self._map_max_rpm, self._map_dialog
+            )
+            self._map_workspace.changed.connect(self._on_workspace_map_changed)
+            layout = QVBoxLayout(self._map_dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._map_workspace)
+            self._map_dialog.finished.connect(self._on_map_dialog_closed)
+        else:
+            self._map_workspace.map.set_flat(self._map_points, self._map_rows)
+        self._map_dialog.show()
+        self._map_dialog.raise_()
+        self._map_dialog.activateWindow()
+
+    def _on_map_dialog_closed(self, _result: int) -> None:
+        self._map_dialog = None
+        self._map_workspace = None
+
+    def _on_workspace_map_changed(self) -> None:
+        if self._map_workspace is None:
+            return
+        self._map_points = self._map_workspace.values()
+        self._map_rows = self._map_workspace.map.rows()
+        self._applied_signature = None
+        widget = self._widgets.get("map")
+        if widget is not None:
+            widget.set_flat(self._map_points, self._map_rows)
 
     def _restore_scale(self) -> None:
         vehicle = self.vehicle
@@ -537,6 +591,9 @@ class TurboModule(FeatureModule):
         if widget is not None:
             self._map_points = widget.flat()
             self._map_rows = widget.rows()
+        if self._map_workspace is not None:
+            # Keep the open Boost Map window current, or its next edit writes back a stale map.
+            self._map_workspace.map.set_flat(self._map_points, self._map_rows)
         self._applied_signature = None
 
     def _flatten_map(self) -> None:
@@ -602,6 +659,9 @@ class TurboModule(FeatureModule):
         tools = self._widgets.get("map_tools")
         if tools is not None:
             tools.setVisible(self._map_enabled)
+        open_button = self._widgets.get("open_map")
+        if open_button is not None:
+            open_button.setVisible(self._map_enabled)
         axis_row = self._widgets.get("map_axis_row")
         if axis_row is not None:
             axis_row.setVisible(self._map_enabled)
@@ -661,6 +721,7 @@ class TurboModule(FeatureModule):
         lag_rate.set_enabled(False)
         self._widgets["lag_rate"] = lag_rate
         spool_card.add(lag_rate)
+        bind_progressive(lag_toggle, lag_rate)
 
         map_card = page.add_card("Boost map", HINT_MAP)
         map_toggle = ToggleRow("Use the boost map", False)
@@ -712,6 +773,12 @@ class TurboModule(FeatureModule):
         tools.setVisible(False)
         self._widgets["map_tools"] = tools
         map_card.add(tools)
+
+        open_map = _Button("Open Boost Map")
+        open_map.clicked.connect(self._open_map_workspace)
+        open_map.setVisible(False)
+        self._widgets["open_map"] = open_map
+        map_card.add(open_map)
 
         gear_card = page.add_card("Boost by gear", HINT_BY_GEAR)
         by_gear = ToggleRow("Enable boost by gear", False)
@@ -869,6 +936,15 @@ class TurboModule(FeatureModule):
                 throttle = vehicle.throttle
                 load = None if throttle is None else 1.0 - throttle
             map_widget.set_live(vehicle.rpm, load)
+        if self._map_workspace is not None:
+            multiplier = self._map_factor(vehicle)
+            self._map_workspace.set_live(
+                vehicle.rpm,
+                vehicle.throttle,
+                vehicle.gear,
+                vehicle.boost_gauge,
+                multiplier,
+            )
 
         turbine = vehicle.turbine
         stats.set("turbine", f"{turbine:.0f}" if turbine is not None else "--", unit="")

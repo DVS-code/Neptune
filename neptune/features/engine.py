@@ -34,7 +34,7 @@ from neptune.features.launchcontrol import (
 )
 from neptune.ui import theme as T
 from neptune.ui.widgets.buttons import Button, PrimaryButton
-from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
+from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
 from neptune.ui.widgets.controls import BindButton, Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
 from neptune.ui.widgets.torquegraph import TorqueGraph
@@ -239,6 +239,14 @@ class EngineModule(FeatureModule):
 
     def bind_turbo(self, turbo) -> None:
         self._turbo = turbo
+
+    @property
+    def anti_lag_active(self) -> bool:
+        return self._engaged
+
+    @property
+    def launch_active(self) -> bool:
+        return self._launch_engaged or self._launch_handoff_active()
 
     def tick_process(self, process) -> None:
         """Resolve and maintain the global launch-control RPM window."""
@@ -521,7 +529,7 @@ class EngineModule(FeatureModule):
     def _cancel_launch_handoff(self) -> None:
         """End a pending handoff. A no-op otherwise.
 
-        ⚠️ `_tick_launch` calls this on every tick the control is up. Resetting the turbine ramp
+        `_tick_launch` calls this on every tick the control is up. Resetting the turbine ramp
         unconditionally here re-zeroed anti-lag's own ramp each tick, so it never built boost.
         """
         if self._launch_handoff_target_rpm is None:
@@ -751,7 +759,7 @@ class EngineModule(FeatureModule):
     def _curve_with_edits(self, edits: dict[int, float]) -> list[float]:
         """The user's curve with graph point edits folded in.
 
-        ⚠️ Built from `_curve_without_cam`, never from the graph's live samples: while the cam
+        Built from `_curve_without_cam`, never from the graph's live samples: while the cam
         or the launch handoff is writing, those samples carry that frame's modulation, and
         saving them would bake it into the custom curve for good.
         """
@@ -765,7 +773,7 @@ class EngineModule(FeatureModule):
     def _restore_cam_idle(self) -> None:
         """Return the live car idle target to the value captured on attach.
 
-        ⚠️ Only when the field still holds the cam's last write. Anything else means the game
+        Only when the field still holds the cam's last write. Anything else means the game
         rebuilt it (a reload, or a different car in the same memory), and writing this car's
         stock idle there would hand it to whatever lives there now.
         """
@@ -1157,7 +1165,8 @@ class EngineModule(FeatureModule):
         mode = Segmented(list(CAM_MODES), self._cam_mode)
         mode.changed.connect(self._on_cam_mode)
         self._widgets["cam_mode"] = mode
-        cam_card.add(FieldRow("Control mode", mode, hint=HINT_CAM_MODE))
+        mode_row = FieldRow("Control mode", mode, hint=HINT_CAM_MODE)
+        cam_card.add(mode_row)
 
         release_rpm = SliderRow(
             "RPM fade-out",
@@ -1187,13 +1196,25 @@ class EngineModule(FeatureModule):
         self._widgets["cam_fade_seconds"] = fade
         cam_card.add(fade)
 
-        cam_card.add(
-            Banner(
-                "Low-rpm lope is a real torque pulse, not just a static curve shape. Throttle gate: "
-                "cam fades from 0% to 25% pedal. A faster pedal rise fades it faster; lifting "
-                "brings it back smoothly.",
-                "info",
-            )
+        cam_note = Banner(
+            "Low-rpm lope is a real torque pulse, not just a static curve shape. Throttle gate: "
+            "cam fades from 0% to 25% pedal. A faster pedal rise fades it faster; lifting "
+            "brings it back smoothly.",
+            "info",
+        )
+        cam_card.add(cam_note)
+        bind_progressive(
+            cam_toggle,
+            aggressiveness,
+            frequency,
+            depth,
+            torque_dip,
+            recovery,
+            sharpness,
+            mode_row,
+            release_rpm,
+            fade,
+            cam_note,
         )
 
         antilag_card = page.add_card("Anti-lag", HINT_ANTILAG)
@@ -1208,7 +1229,8 @@ class EngineModule(FeatureModule):
         )
         self._widgets["bind"] = bind_button
 
-        antilag_card.add(FieldRow("Hold control", bind_button))
+        bind_row = FieldRow("Hold control", bind_button)
+        antilag_card.add(bind_row)
 
         hold = SliderRow("Hold at", HOLD_MIN, HOLD_MAX, 4000, step=100, decimals=0, unit="rpm")
         hold.changed.connect(self._on_hold_rpm)
@@ -1235,6 +1257,7 @@ class EngineModule(FeatureModule):
         cap.set_enabled(False)
         self._widgets["speed_cap"] = cap
         antilag_card.add(cap)
+        bind_progressive(arm, bind_row, hold, boost_toggle, cap_toggle, cap)
 
         launch_card = page.add_card("Enhanced launch control", HINT_LAUNCH)
         launch_note = Banner(NOTE_LAUNCH_GAME_LC, "warn")
@@ -1277,6 +1300,8 @@ class EngineModule(FeatureModule):
         lc_status.setVisible(False)
         self._widgets["lc_status"] = lc_status
         launch_card.add(lc_status)
+        # The status banner shows and hides itself in refresh().
+        bind_progressive(lc_toggle, lc_min, lc_max)
 
         launch_arm = ToggleRow("Enable enhanced launch control", False)
         launch_arm.toggle.toggled_value.connect(self._on_launch_armed)
@@ -1460,7 +1485,7 @@ class EngineModule(FeatureModule):
         def _number(key, fallback, low=None, high=None):
             """Read a number defensively.
 
-            ⚠️ A hand-edited or corrupt preset can hold a string, None, NaN or infinity. Bare
+            A hand-edited or corrupt preset can hold a string, None, NaN or infinity. Bare
             `int()`/`float()` raise on those and abort the load half-way, leaving the module in a
             mixed state. Every field falls back to its default and clamps to its own rail instead.
             """

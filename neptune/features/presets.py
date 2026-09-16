@@ -12,7 +12,7 @@ from neptune.ui.widgets.card import Banner
 
 CAPTION = (
     "Presets cover suspension and the DYNO page, including its boost gauge and Dragy settings. "
-    "Engine and turbo setups are saved per car in the Tunes tab."
+    "Engine, Turbo and verified Transmission settings are saved per car in the Tunes tab."
 )
 
 

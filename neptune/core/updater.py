@@ -9,7 +9,7 @@ FAIL-SILENT BY DESIGN. Any network, parse or permission problem resolves to "no 
 check must never block startup, never raise into the UI, and never stop someone using the tool
 offline.
 
-⚠️ The swap only applies to a FROZEN build. Running from source has no single exe to replace, so the
+The swap only applies to a FROZEN build. Running from source has no single exe to replace, so the
 check still reports but the install path is refused and the releases page is opened instead.
 """
 
@@ -123,7 +123,7 @@ def check(timeout: int = TIMEOUT_SECONDS) -> tuple[str, UpdateInfo | None]:
 def check_async(callback) -> None:
     """Run `check` off the interface thread and hand the result back.
 
-    ⚠️ `callback` is invoked on a WORKER thread. A Qt caller must marshal onto the GUI thread
+    `callback` is invoked on a WORKER thread. A Qt caller must marshal onto the GUI thread
     before touching widgets.
     """
 

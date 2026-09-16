@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
 from neptune.ui import theme as T
-from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
+from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
 from neptune.ui.widgets.controls import BindButton, SectionHeading, Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
 from neptune.ui.widgets.transitioncurve import (
@@ -185,6 +185,7 @@ class SuspensionModule(FeatureModule):
         # Keep the existing behaviour for older presets while allowing the
         # user to disarm the air-ride action without losing its settings.
         self._airride_enabled = True
+        self._enabled = bool(settings.get("suspension_enabled"))
         self._lowered = False
 
         self._thread: threading.Thread | None = None
@@ -234,7 +235,7 @@ class SuspensionModule(FeatureModule):
     def _on_settings_changed(self, key: str) -> None:
         """Live-apply the volume sliders that live in Settings.
 
-        ⚠️ `Settings._notify` passes only the KEY, not the value — read it back rather than
+        `Settings._notify` passes only the KEY, not the value — read it back rather than
         expecting a second argument, or every notification raises and is swallowed.
         """
         if key == "airride_volume":
@@ -287,6 +288,7 @@ class SuspensionModule(FeatureModule):
             if slider is not None and value is not None:
                 slider.set_value(value)
         for key, state in (
+            ("enabled", self._enabled),
             ("airride_enabled", self._airride_enabled),
             ("bounce", self._bounce),
             ("bounce_audio", self._bounce_audio),
@@ -499,6 +501,8 @@ class SuspensionModule(FeatureModule):
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
+        if not self._enabled:
+            return
         if self.stock and (self._lowered or self._front_percent or self._rear_percent):
             self._write(self._target(self._lowered))
         if any(value is not None for value in self._camber) or self._air_camber:
@@ -603,6 +607,11 @@ class SuspensionModule(FeatureModule):
             self._capture_track_stock(vehicle)
         if self.stock_toe is None:
             self._capture_toe_stock(vehicle)
+        if not self._enabled:
+            self._edge.reset()
+            for edge in self._hydraulics_edges.values():
+                edge.reset()
+            return
         if self._rear_solid_axle is None or self._rigid_body_tires is None:
             self._check_rear_axle(vehicle)
         if self._airride_enabled and self._edge.pressed(self.binding()):
@@ -1055,7 +1064,7 @@ class SuspensionModule(FeatureModule):
         self._controls_dirty = True
 
     def toggle(self) -> None:
-        if not self._airride_enabled:
+        if not self._enabled or not self._airride_enabled:
             return
         if not self.stock or self.vehicle is None:
             return
@@ -1082,7 +1091,7 @@ class SuspensionModule(FeatureModule):
 
     def set_bounce(self, enabled: bool) -> None:
         """Start or stop the continuous up/down cycle."""
-        enabled = bool(enabled)
+        enabled = bool(enabled) and self._enabled
         if enabled == self._bounce:
             return
         self._bounce = enabled
@@ -1326,7 +1335,7 @@ class SuspensionModule(FeatureModule):
         self._manual_move_to(target, action)
 
     def _update_hydraulics_visibility(self) -> None:
-        """All hydraulics controls are manual-only and always visible."""
+        """Show manual hydraulics details only while hydraulics is armed."""
         for key in (
             "hydraulics_manual_height",
             "hydraulics_manual_speed",
@@ -1334,11 +1343,21 @@ class SuspensionModule(FeatureModule):
         ):
             widget = self._widgets.get(key)
             if widget is not None:
-                widget.setVisible(True)
+                widget.setVisible(self._hydraulics)
+
+    def _set_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        self.settings.remember("suspension_enabled", enabled)
+        if not enabled:
+            self.restore()
+        self._controls_dirty = True
 
 
     def set_hydraulics(self, enabled: bool) -> None:
-        enabled = bool(enabled)
+        enabled = bool(enabled) and self._enabled
         if enabled == self._hydraulics:
             return
 
@@ -1567,7 +1586,19 @@ class SuspensionModule(FeatureModule):
     def build_page(self, page) -> None:
         from neptune.ui.widgets.buttons import Button, PrimaryButton
 
+        enable_card = page.add_card("Suspension")
+        enabled = ToggleRow(
+            "Enable suspension controls",
+            self._enabled,
+            hint="Shows the suspension controls and permits Neptune to apply ride-height, alignment, air-ride and hydraulics changes.",
+        )
+        enabled.toggle.toggled_value.connect(self._set_enabled)
+        self._widgets["enabled"] = enabled
+        enable_card.add(enabled)
+        feature_widgets = []
+
         height_card = page.add_card("Ride height", "Moves the height the car normally sits at.")
+        feature_widgets.append(height_card)
         self._widgets["height_card"] = height_card
 
         front = SliderRow(
@@ -1603,6 +1634,7 @@ class SuspensionModule(FeatureModule):
         height_card.add(reset_button)
 
         camber_card = page.add_card("Camber", HINT_CAMBER)
+        feature_widgets.append(camber_card)
         self._widgets["camber_card"] = camber_card
 
         camber_banner = Banner("", "warn")
@@ -1673,6 +1705,7 @@ class SuspensionModule(FeatureModule):
         camber_card.add(camber_reset_button)
 
         track_card = page.add_card("Track Width", HINT_TRACK)
+        feature_widgets.append(track_card)
 
         track_banner = Banner("", "warn")
         self._widgets["track_banner"] = track_banner
@@ -1740,6 +1773,7 @@ class SuspensionModule(FeatureModule):
         track_card.add(track_reset_button)
 
         toe_card = page.add_card("Toe", HINT_TOE)
+        feature_widgets.append(toe_card)
 
         toe_banner = Banner("", "warn")
         self._widgets["toe_banner"] = toe_banner
@@ -1809,6 +1843,7 @@ class SuspensionModule(FeatureModule):
         toe_card.add(toe_reset_button)
 
         air_card = page.add_card("Air ride", "Drops the car on a key press.")
+        feature_widgets.append(air_card)
 
         airride_enabled = ToggleRow(
             "Enable air ride",
@@ -1881,6 +1916,7 @@ class SuspensionModule(FeatureModule):
         air_card.add(FieldRow("Order", sequence, hint=HINT_SEQUENCE))
 
         air_camber_card = page.add_card("Air ride camber", HINT_AIR_CAMBER)
+        feature_widgets.append(air_camber_card)
 
         air_camber = ToggleRow("Animate with air ride", self._air_camber, hint=HINT_AIR_CAMBER)
         air_camber.toggle.toggled_value.connect(self._set_air_camber)
@@ -1926,6 +1962,7 @@ class SuspensionModule(FeatureModule):
         air_camber_card.add(reset_curve)
 
         bounce_card = page.add_card("Maybach bounce", "Rocks the car up and down on repeat.")
+        feature_widgets.append(bounce_card)
 
         bounce_toggle = ToggleRow("Bounce", self._bounce, hint=HINT_BOUNCE)
         bounce_toggle.toggle.toggled_value.connect(self.set_bounce)
@@ -1986,6 +2023,7 @@ class SuspensionModule(FeatureModule):
             "Hydraulics",
             "Fully manual lowrider hydraulics. Nothing moves until you press a control.",
         )
+        feature_widgets.append(hydraulics_card)
 
         hydraulics_toggle = ToggleRow(
             "Hydraulics",
@@ -2147,6 +2185,7 @@ class SuspensionModule(FeatureModule):
         self._widgets["stats"] = stats
         live_card.add(stats)
 
+        bind_progressive(enabled, *feature_widgets)
         self._update_axle_banner()
 
     def refresh(self, vehicle) -> None:
@@ -2187,6 +2226,7 @@ class SuspensionModule(FeatureModule):
 
     def save_state(self) -> dict:
         return {
+            "enabled": self._enabled,
             "units": "percent",
             "front": self._front_percent,
             "rear": self._rear_percent,
@@ -2223,10 +2263,17 @@ class SuspensionModule(FeatureModule):
     def load_state(self, data: dict) -> None:
         data = data or {}
 
+        enabled = bool(data.get("enabled", True))
+        self._set_enabled(enabled)  # turning off puts the car back to stock first
+        toggle = self._widgets.get("enabled")
+        if toggle is not None:
+            toggle.set_value(enabled)
+        airride_enabled = bool(data.get("airride_enabled", True))
+
         def _number(key, fallback, low=None, high=None):
             """A preset is a file on disk: treat every field as untrusted.
 
-            ⚠️ A bare `float(...)` here raised on a hand-edited or corrupt preset (a string, None,
+            A bare `float(...)` here raised on a hand-edited or corrupt preset (a string, None,
             or NaN), which aborted the whole load and left the module half-populated. Bad fields
             now fall back to the default instead.
             """
@@ -2256,7 +2303,6 @@ class SuspensionModule(FeatureModule):
         self._drop_percent = _percent("drop", DROP_PERCENT_DEFAULT, 0.0, LOWER_PERCENT_MAX)
         self._floor_percent = _percent("floor", DEFAULT_FLOOR_PERCENT, 0.0, 100.0)
         self._ramp_seconds = _number("ramp_seconds", DEFAULT_RAMP_SECONDS, 0.3, 6.0)
-        airride_enabled = bool(data.get("airride_enabled", True))
         self._edge.reset()
 
         sequence = data.get("sequence")
@@ -2288,7 +2334,7 @@ class SuspensionModule(FeatureModule):
             for key in ("camber_fl", "camber_fr", "camber_rr", "camber_rl")
         ]
         self._camber_mirror = bool(data.get("camber_mirror", True))
-        if any(value is not None for value in self._camber):
+        if self._enabled and any(value is not None for value in self._camber):
             self._write_active_camber()
 
         self._track = [
@@ -2296,7 +2342,7 @@ class SuspensionModule(FeatureModule):
             for key in ("track_fl", "track_fr", "track_rr", "track_rl")
         ]
         self._track_mirror = bool(data.get("track_mirror", True))
-        if any(value is not None for value in self._track):
+        if self._enabled and any(value is not None for value in self._track):
             self._write_track()
 
         self._toe = [
@@ -2304,11 +2350,11 @@ class SuspensionModule(FeatureModule):
             for key in ("toe_fl", "toe_fr", "toe_rr", "toe_rl")
         ]
         self._toe_mirror = bool(data.get("toe_mirror", True))
-        if any(value is not None for value in self._toe):
+        if self._enabled and any(value is not None for value in self._toe):
             self._write_toe()
 
         # Last, once heights and camber are loaded: disabling air ride while the car sits
-        # dropped has to lift it, or it stays down with the drop control locked.
+        # dropped has to lift it to the new heights, or it stays down with the drop locked.
         self.set_airride_enabled(airride_enabled)
 
         self._controls_dirty = True

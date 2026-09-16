@@ -43,11 +43,7 @@ def save_preset(name: str, registry: ModuleRegistry) -> tuple[bool, str]:
         if state:
             data[module.name] = state
 
-    try:
-        target = os.path.join(paths.preset_dir(), cleaned + ".json")
-        with open(target, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2)
-    except OSError:
+    if not paths.write_json(os.path.join(paths.preset_dir(), cleaned + ".json"), data):
         return False, "Could not write the preset file."
     return True, f'Saved "{cleaned}".'
 

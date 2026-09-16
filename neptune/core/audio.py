@@ -11,7 +11,7 @@ Both are deliberately FORGIVING: if the asset is missing, the audio backend is u
 platform has no output device, every call turns into a no-op instead of raising. Sound is a garnish
 on these features — a missing file must never stop the car from moving.
 
-⚠️ Qt objects must be created on the GUI thread. Playback is triggered from feature code that may be
+Qt objects must be created on the GUI thread. Playback is triggered from feature code that may be
 running on the runtime thread, so `play()`/`start()` are safe to call from anywhere: they marshal
 onto the owning thread with a queued invocation rather than touching the player directly.
 """
@@ -72,7 +72,7 @@ class OneShot(QObject):
     def _play(self) -> None:
         """Fire the sample, waiting for the decode if it has not finished yet.
 
-        ⚠️ QSoundEffect loads ASYNCHRONOUSLY — `isLoaded()` is False for roughly a second after
+        QSoundEffect loads ASYNCHRONOUSLY — `isLoaded()` is False for roughly a second after
         construction. Simply skipping the play when it is not loaded silently swallowed the very
         first air-ride drop after launch, which is exactly the moment a user tests it. If the sample
         is still decoding, arm a one-shot that plays as soon as it becomes ready.

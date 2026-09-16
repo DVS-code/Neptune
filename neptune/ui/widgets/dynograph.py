@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from neptune.memory import offsets as O
 from neptune.ui import theme as T
 
 MARGIN_LEFT = 48
@@ -35,6 +36,12 @@ class DynoGraph(QWidget):
         self.torque_unit = "Nm"
         self.power_unit = "hp"
 
+    def set_units(self, torque_unit: str = "Nm", power_unit: str = "hp") -> None:
+        """Set the axis units. Data stays in Nm and hp: a unit scales the axis labels, not the trace."""
+        self.torque_unit = torque_unit if torque_unit in ("Nm", "lb-ft") else "Nm"
+        self.power_unit = power_unit if power_unit in ("hp", "kW") else "hp"
+        self.update()
+
     def set_data(
         self,
         torque,
@@ -44,10 +51,7 @@ class DynoGraph(QWidget):
         redline=None,
         show_torque=True,
         show_power=True,
-        torque_unit="Nm",
-        power_unit="hp",
     ) -> None:
-        """Values arrive already converted to `torque_unit` and `power_unit`."""
         self.torque = [float(value) for value in (torque or [])]
         self.power = [float(value) for value in (power or [])]
         self.rpm_per_index = float(rpm_per_index or 100.0)
@@ -55,8 +59,6 @@ class DynoGraph(QWidget):
         self.redline = float(redline) if redline and redline > 0 else None
         self.show_torque = bool(show_torque)
         self.show_power = bool(show_power)
-        self.torque_unit = torque_unit
-        self.power_unit = power_unit
         wanted = GRAPH_HEIGHT if (self.torque or self.power) else EMPTY_HEIGHT
         if self.height() != wanted:
             self.setFixedHeight(wanted)
@@ -128,6 +130,8 @@ class DynoGraph(QWidget):
         font.setPointSize(8)
         painter.setFont(font)
         painter.setPen(QColor(T.TEXT_FAINT))
+        torque_max *= O.NM_TO_LBFT if self.torque_unit == "lb-ft" else 1.0
+        power_max *= O.HP_TO_KW if self.power_unit == "kW" else 1.0
 
         for step in range(GRID_LINES + 1):
             fraction = 1.0 - step / GRID_LINES
@@ -142,9 +146,7 @@ class DynoGraph(QWidget):
             )
 
         painter.drawText(QRectF(0, 2, MARGIN_LEFT, 16), Qt.AlignRight, self.torque_unit)
-        painter.drawText(
-            QRectF(plot.right() + 7, 2, MARGIN_RIGHT - 7, 16), Qt.AlignLeft, self.power_unit
-        )
+        painter.drawText(QRectF(plot.right() + 7, 2, MARGIN_RIGHT - 7, 16), Qt.AlignLeft, self.power_unit)
         painter.drawText(
             QRectF(plot.left(), plot.bottom() + 7, plot.width(), 18),
             Qt.AlignCenter,
