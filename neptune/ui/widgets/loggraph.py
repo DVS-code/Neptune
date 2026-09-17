@@ -11,10 +11,10 @@ from neptune.memory import offsets as O
 from neptune.ui import theme as T
 
 GROUPS = {
-    "POWER": ("power", "torque", "rpm"),
-    "TURBO": ("boost", "boost_multiplier", "throttle"),
-    "ACCELERATION": ("speed_ms", "gear"),
-    "TRANSMISSION": ("gear", "rpm", "speed_ms"),
+    "Power": ("power", "torque", "rpm"),
+    "Turbo": ("boost", "boost_multiplier", "throttle"),
+    "Acceleration": ("speed_ms", "gear"),
+    "Transmission": ("gear", "rpm", "speed_ms"),
 }
 
 COLOURS = (T.ACCENT_BRIGHT, T.INFO, T.OK, T.WARN)
@@ -27,7 +27,7 @@ class LogGraph(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(280)
         self._log: NeptuneLog | None = None
-        self._group = "POWER"
+        self._group = next(iter(GROUPS))
         self._cursor = 0
         self._units = {"speed": "km/h", "pressure": "psi", "power": "hp", "torque": "Nm"}
         # A log holds up to 250k samples. Converting and decimating them on every paint made each

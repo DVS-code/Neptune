@@ -6,17 +6,18 @@ import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
     QListWidgetItem,
-    QTableWidget,
+    QSizePolicy,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
+from qfluentwidgets import ComboBox, ListWidget, StrongBodyLabel, TableWidget
 
 from neptune.core.analysis import GOALS, suggestions_for
 from neptune.core.logs import boost_map_path, compare_logs, load_log, map_context
@@ -24,8 +25,55 @@ from neptune.core.models import NeptuneLog, TuneSuggestion
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.buttons import Button, PrimaryButton
-from neptune.ui.widgets.card import Banner, StatStrip
+from neptune.ui.widgets.card import Banner, Card, StatStrip
+from neptune.ui.widgets.controls import SectionHeading, Segmented
 from neptune.ui.widgets.loggraph import GROUPS, LogGraph
+
+SIDE_WIDTH = 320
+CARD_MARGIN = 18  # Card's left and right content margin
+HINT_ASSISTANT = "Suggestions cite the logged evidence. Nothing is applied until you preview and approve it."
+HINT_EVENTS = "Click an event to move the graph cursor to it."
+NOTE_ASSISTANT_OFF = "Enable Tuning Assistant in Settings to generate evidence-based proposals."
+DEFAULT_UNITS = {"power": "hp", "torque": "Nm", "pressure": "psi"}
+METRICS = {  # key: (label, unit or unit kind, conversion)
+    "duration": ("Duration", "s", None),
+    "peak_power": ("Peak power", "power", "power"),
+    "peak_torque": ("Peak torque", "torque", "torque"),
+    "peak_boost": ("Peak boost", "pressure", "pressure"),
+    "peak_rpm": ("Peak RPM", "rpm", None),
+}
+
+
+def _hint(text: str = "") -> QLabel:
+    """Muted wrapped text, styled like the row hints on every page."""
+    label = QLabel(text)
+    label.setObjectName("RowHint")
+    label.setWordWrap(True)
+    return label
+
+
+def _table(rows: int, headers: list[str]) -> TableWidget:
+    table = TableWidget()
+    table.setRowCount(rows)
+    table.setColumnCount(len(headers))
+    table.setHorizontalHeaderLabels(headers)
+    table.setBorderVisible(True)
+    table.setBorderRadius(T.CONTROL_RADIUS)
+    table.setWordWrap(False)
+    table.verticalHeader().hide()
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    table.setEditTriggers(TableWidget.NoEditTriggers)
+    table.setSelectionMode(TableWidget.NoSelection)
+    return table
+
+
+def _factors(units: dict) -> dict[str, float]:
+    """Stored metrics are hp, Nm and psi; these convert them to the units the run was logged in."""
+    return {
+        "power": O.HP_TO_KW if units.get("power") == "kW" else 1.0,
+        "torque": O.NM_TO_LBFT if units.get("torque") == "lb-ft" else 1.0,
+        "pressure": O.PSI_TO_BAR if units.get("pressure") == "bar" else 1.0,
+    }
 
 
 class LogReaderWindow(QDialog):
@@ -37,100 +85,116 @@ class LogReaderWindow(QDialog):
 
     def __init__(self, parent=None, assistant_enabled: bool = False):
         super().__init__(parent)
+        self.setObjectName("Root")  # the app background from theme.stylesheet(), not Fusion's grey
         self.setWindowTitle("Neptune Log Reader / Analyzer")
-        self.resize(1100, 760)
+        self.resize(1180, 800)
         self._log: NeptuneLog | None = None
         self._path = ""
         self._assistant_enabled = bool(assistant_enabled)
-        self._value_labels: dict[str, QLabel] = {}
         self._tune_state_provider = None
         self._suggestion_items: list[TuneSuggestion] = []
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(22, 20, 22, 22)
-        root.setSpacing(12)
+        root.setContentsMargins(T.PAGE_PADDING, 22, T.PAGE_PADDING, 22)
+        root.setSpacing(T.CARD_GAP)
 
         header = QHBoxLayout()
-        title = QLabel("Neptune Log Reader")
-        title.setObjectName("StatValue")
-        header.addWidget(title)
-        header.addStretch(1)
+        header.addWidget(SectionHeading("Neptune Log Reader", "Analyze a saved run offline."), 1)
         open_button = PrimaryButton("Open .nlog")
         open_button.clicked.connect(self.open_file)
-        header.addWidget(open_button)
+        header.addWidget(open_button, 0, Qt.AlignTop)
         root.addLayout(header)
 
-        identity = QLabel("No log loaded")
-        identity.setObjectName("StatValue")
-        identity.setWordWrap(True)
+        run_card = Card()
+        run_row = QHBoxLayout()
+        run_row.setSpacing(8)
+        identity_column = QVBoxLayout()
+        identity_column.setSpacing(4)
+        identity = StrongBodyLabel("No log loaded")
         self._identity = identity
-        root.addWidget(identity)
-
+        identity_column.addWidget(identity)
+        details = _hint()
+        details.setVisible(False)
+        self._details = details
+        identity_column.addWidget(details)
+        run_row.addLayout(identity_column, 1)
+        edit = Button("Edit Preset")
+        edit.clicked.connect(lambda: self.edit_preset_requested.emit(self._log))
+        run_row.addWidget(edit, 0, Qt.AlignTop)
+        duplicate = PrimaryButton("Duplicate && Edit")  # a single & is a keyboard mnemonic
+        duplicate.clicked.connect(lambda: self.duplicate_preset_requested.emit(self._log))
+        run_row.addWidget(duplicate, 0, Qt.AlignTop)
+        open_map = Button("Open Boost Map overlay")
+        open_map.clicked.connect(lambda: self.open_map_requested.emit(self._log))
+        run_row.addWidget(open_map, 0, Qt.AlignTop)
+        run_card.add_layout(run_row)
         stats = StatStrip()
         for key, label in (("quality", "Run quality"), ("duration", "Duration"), ("power", "Peak power"), ("torque", "Peak torque"), ("boost", "Peak boost"), ("rpm", "Peak RPM")):
             stats.add(key, label, "--")
         self._stats = stats
-        root.addWidget(stats)
+        run_card.add(stats)
+        root.addWidget(run_card)
 
         content = QHBoxLayout()
-        content.setSpacing(14)
-        graph_column = QVBoxLayout()
-        group = QComboBox()
-        group.addItems(list(GROUPS))
-        group.currentTextChanged.connect(self._set_group)
-        graph_column.addWidget(group)
+        content.setSpacing(T.CARD_GAP)
+        graph_card = Card()
+        graph_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        group_row = QHBoxLayout()
+        group = Segmented(list(GROUPS), next(iter(GROUPS)))
+        group.changed.connect(self._set_group)
+        group_row.addWidget(group)
+        group_row.addStretch(1)
+        graph_card.add_layout(group_row)
         self._graph = LogGraph()
         self._graph.cursor_changed.connect(self._set_cursor)
-        graph_column.addWidget(self._graph, 1)
-        current = QLabel("Current point: --")
-        current.setStyleSheet(f"color: {T.TEXT_MUTED};")
+        graph_card.body.addWidget(self._graph, 1)
+        current = _hint("Current point: --")
         self._current = current
-        graph_column.addWidget(current)
-        map_context = QLabel("Boost Map path: --")
-        map_context.setStyleSheet(f"color: {T.TEXT_MUTED};")
-        self._map_context = map_context
-        graph_column.addWidget(map_context)
-        content.addLayout(graph_column, 1)
+        graph_card.add(current)
+        path_label = _hint("Boost Map path: --")
+        self._map_context = path_label
+        graph_card.add(path_label)
+        content.addWidget(graph_card, 1)
 
-        side = QVBoxLayout()
-        side.addWidget(QLabel("Tuning Assistant"))
-        goal = QComboBox()
-        goal.addItems(list(GOALS))
+        side = QWidget()
+        side.setFixedWidth(SIDE_WIDTH)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(T.CARD_GAP)
+
+        assistant = Card("Tuning Assistant", HINT_ASSISTANT)
+        goal = ComboBox()
+        for name in GOALS:
+            goal.addItem(name or "Any goal", userData=name)
         self._goal = goal
-        side.addWidget(goal)
+        assistant.add(goal)
         suggest = Button("Analyze evidence")
         suggest.clicked.connect(self._show_suggestions)
-        side.addWidget(suggest)
-        suggestions = QLabel("Enable Tuning Assistant in Settings to generate evidence-based proposals.")
-        suggestions.setWordWrap(True)
-        suggestions.setStyleSheet(f"color: {T.TEXT_MUTED};")
+        assistant.add(suggest)
+        suggestions = _hint(NOTE_ASSISTANT_OFF)
         self._suggestions = suggestions
-        side.addWidget(suggestions)
-        suggestion_choice = QComboBox()
+        assistant.add(suggestions)
+        suggestion_choice = ComboBox()
         suggestion_choice.currentIndexChanged.connect(self._render_suggestion)
         suggestion_choice.setVisible(False)
         self._suggestion_choice = suggestion_choice
-        side.addWidget(suggestion_choice)
+        assistant.add(suggestion_choice)
         preview = Button("Preview proposal")
         preview.setEnabled(False)
         preview.clicked.connect(self._preview_suggestion)
         self._preview = preview
-        side.addWidget(preview)
-        side.addWidget(QLabel("Events"))
-        events = QListWidget()
+        assistant.add(preview)
+        side_layout.addWidget(assistant)
+
+        events_card = Card("Events", HINT_EVENTS)
+        events_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        events = ListWidget()
+        events.setMinimumHeight(120)
         events.itemClicked.connect(self._event_clicked)
         self._events = events
-        side.addWidget(events, 1)
-        edit = Button("Edit Preset")
-        edit.clicked.connect(lambda: self.edit_preset_requested.emit(self._log))
-        side.addWidget(edit)
-        duplicate = PrimaryButton("Duplicate & Edit")
-        duplicate.clicked.connect(lambda: self.duplicate_preset_requested.emit(self._log))
-        side.addWidget(duplicate)
-        open_map = Button("Open Boost Map overlay")
-        open_map.clicked.connect(lambda: self.open_map_requested.emit(self._log))
-        side.addWidget(open_map)
-        content.addLayout(side)
+        events_card.body.addWidget(events, 1)
+        side_layout.addWidget(events_card, 1)
+        content.addWidget(side)
         root.addLayout(content, 1)
 
         self._status = Banner("Open a saved .nlog file. This window does not require the game to be running.", "info")
@@ -164,18 +228,18 @@ class LogReaderWindow(QDialog):
         power_unit = units.get("power", "hp")
         torque_unit = units.get("torque", "Nm")
         pressure_unit = units.get("pressure", "psi")
-        power_factor = O.HP_TO_KW if power_unit == "kW" else 1.0
-        torque_factor = O.NM_TO_LBFT if torque_unit == "lb-ft" else 1.0
-        pressure_factor = O.PSI_TO_BAR if pressure_unit == "bar" else 1.0
+        factors = _factors(units)
         car = log.metadata.car.friendly_name or log.metadata.car.media_name or "Unknown car"
         tune = log.metadata.tune_name or "Unsaved tune"
         revision = f" V{log.metadata.tune_revision}" if log.metadata.tune_revision else ""
-        self._identity.setText(f"{car}\n{tune}{revision}  ·  {log.metadata.test_type}\n{log.metadata.created_at}")
+        self._identity.setText(car)
+        self._details.setText(f"{tune}{revision}  ·  {log.metadata.test_type}  ·  {log.metadata.created_at}")
+        self._details.setVisible(True)
         self._stats.set("quality", log.analysis.quality, T.OK if log.analysis.quality in ("Excellent", "Good") else T.WARN if log.analysis.quality == "Poor" else T.ERR)
         self._stats.set("duration", f"{log.analysis.duration:.2f}" if log.analysis.duration is not None else "--", unit="s")
-        self._stats.set("power", f"{log.analysis.metrics['peak_power'] * power_factor:.0f}" if "peak_power" in log.analysis.metrics else "--", unit=power_unit)
-        self._stats.set("torque", f"{log.analysis.metrics['peak_torque'] * torque_factor:.0f}" if "peak_torque" in log.analysis.metrics else "--", unit=torque_unit)
-        self._stats.set("boost", f"{log.analysis.metrics['peak_boost'] * pressure_factor:.1f}" if "peak_boost" in log.analysis.metrics else "--", unit=pressure_unit)
+        self._stats.set("power", f"{log.analysis.metrics['peak_power'] * factors['power']:.0f}" if "peak_power" in log.analysis.metrics else "--", unit=power_unit)
+        self._stats.set("torque", f"{log.analysis.metrics['peak_torque'] * factors['torque']:.0f}" if "peak_torque" in log.analysis.metrics else "--", unit=torque_unit)
+        self._stats.set("boost", f"{log.analysis.metrics['peak_boost'] * factors['pressure']:.1f}" if "peak_boost" in log.analysis.metrics else "--", unit=pressure_unit)
         self._stats.set("rpm", f"{log.analysis.metrics['peak_rpm']:.0f}" if "peak_rpm" in log.analysis.metrics else "--", unit="rpm")
         self._graph.set_log(log)
         hits, path = boost_map_path(log.samples, *map_context(log))
@@ -227,7 +291,7 @@ class LogReaderWindow(QDialog):
         if self._log is None:
             return
         if not self._assistant_enabled:
-            self._suggestions.setText("Enable Tuning Assistant in Settings to generate evidence-based proposals.")
+            self._set_suggestion_text(NOTE_ASSISTANT_OFF)
             self._suggestion_choice.setVisible(False)
             self._preview.setEnabled(False)
             return
@@ -237,7 +301,7 @@ class LogReaderWindow(QDialog):
                 tune_state = self._tune_state_provider(self._log)
             except Exception:
                 tune_state = None
-        suggestions = suggestions_for(self._log, self._goal.currentText(), tune_state)
+        suggestions = suggestions_for(self._log, self._goal.currentData() or "", tune_state)
         self._suggestion_items = suggestions
         self._suggestion_choice.blockSignals(True)
         self._suggestion_choice.clear()
@@ -245,18 +309,24 @@ class LogReaderWindow(QDialog):
         self._suggestion_choice.blockSignals(False)
         self._suggestion_choice.setVisible(bool(suggestions))
         if not suggestions:
-            self._suggestions.setText("No evidence-backed suggestion was found for this goal.")
+            self._set_suggestion_text("No evidence-backed suggestion was found for this goal.")
             self._preview.setEnabled(False)
             return
         self._suggestion_choice.setCurrentIndex(0)
         self._render_suggestion(0)
+
+    def _set_suggestion_text(self, text: str) -> None:
+        self._suggestions.setText(text)
+        # A wrapped label does not reserve its wrapped height in a crowded column, so its lines got
+        # squeezed under the buttons: pin that height for the side column's fixed text width.
+        self._suggestions.setMinimumHeight(self._suggestions.heightForWidth(SIDE_WIDTH - 2 * CARD_MARGIN))
 
     def _render_suggestion(self, index: int) -> None:
         if not self._suggestion_items or not 0 <= index < len(self._suggestion_items):
             self._preview.setEnabled(False)
             return
         suggestion = self._suggestion_items[index]
-        self._suggestions.setText(f"{suggestion.title}: {suggestion.summary}\nEvidence: {suggestion.evidence}")
+        self._set_suggestion_text(f"{suggestion.title}: {suggestion.summary}\nEvidence: {suggestion.evidence}")
         self._preview.setEnabled(bool(suggestion.proposal_patches))
 
     def _preview_suggestion(self) -> None:
@@ -274,13 +344,11 @@ class SuggestionPreviewDialog(QDialog):
 
     def __init__(self, suggestion: TuneSuggestion, parent=None):
         super().__init__(parent)
+        self.setObjectName("Root")
         self.setWindowTitle("Preview tune suggestion")
         self.resize(720, 420)
-        self._table = QTableWidget(len(suggestion.changes), 5)
-        self._table.setHorizontalHeaderLabels(["Apply", "Module", "Setting", "Current", "Proposed"])
-        self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._table.setSelectionMode(QTableWidget.NoSelection)
+        self._table = _table(len(suggestion.changes), ["Apply", "Module", "Setting", "Current", "Proposed"])
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         for row, change in enumerate(suggestion.changes):
             check = QTableWidgetItem()
             check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
@@ -289,8 +357,11 @@ class SuggestionPreviewDialog(QDialog):
             for column, value in enumerate((change.field, change.setting, change.current, change.proposed), 1):
                 self._table.setItem(row, column, QTableWidgetItem(str(value)))
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"{suggestion.title}\n{suggestion.evidence}"))
-        layout.addWidget(self._table)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+        layout.addWidget(StrongBodyLabel(suggestion.title))
+        layout.addWidget(_hint(suggestion.evidence))
+        layout.addWidget(self._table, 1)
         buttons = QHBoxLayout()
         apply_selected = PrimaryButton("Apply selected")
         apply_selected.clicked.connect(self.accept)
@@ -321,31 +392,50 @@ class LogCompareWindow(QDialog):
 
     def __init__(self, left_path: str, right_path: str, parent=None):
         super().__init__(parent)
+        self.setObjectName("Root")
         self.setWindowTitle("Compare Neptune Logs")
-        self.resize(700, 520)
+        self.resize(700, 600)
         layout = QVBoxLayout(self)
-        title = QLabel("Log comparison")
-        title.setObjectName("StatValue")
-        layout.addWidget(title)
-        report = QLabel()
-        report.setWordWrap(True)
-        layout.addWidget(report)
+        layout.setContentsMargins(T.PAGE_PADDING, 22, T.PAGE_PADDING, 22)
+        layout.setSpacing(T.CARD_GAP)
+        layout.addWidget(
+            SectionHeading("Log comparison", "Differences are reported as observations; this view does not claim causation.")
+        )
         left, left_message = load_log(left_path)
         right, right_message = load_log(right_path)
         if left is None or right is None:
-            report.setText(left_message or right_message)
+            layout.addWidget(Banner(left_message or right_message, "error"))
+            layout.addStretch(1)
             return
         compared = compare_logs(left, right)
-        lines = [
-            f"A: {left.metadata.car.friendly_name or left.metadata.car.media_name} · {left.metadata.tune_name or 'unsaved'}",
-            f"B: {right.metadata.car.friendly_name or right.metadata.car.media_name} · {right.metadata.tune_name or 'unsaved'}",
-            f"Compatible: {'yes' if compared['compatible'] else 'no'}",
-            f"Quality: {left.analysis.quality} → {right.analysis.quality}",
-            "",
-        ]
-        for key, values in compared.get("metrics", {}).items():
-            lines.append(f"{key}: {values['left']:.3f} → {values['right']:.3f}  ({values['difference']:+.3f})")
-        if compared.get("reasons"):
-            lines.extend(["", *compared["reasons"]])
-        lines.extend(["", "Differences are reported as observations; this view does not claim causation."])
-        report.setText("\n".join(lines))
+
+        runs = Card()
+        for tag, log in (("A", left), ("B", right)):
+            car = log.metadata.car.friendly_name or log.metadata.car.media_name or "Unknown car"
+            runs.add(StrongBodyLabel(f"{tag}: {car}"))
+            runs.add(_hint(f"{log.metadata.tune_name or 'Unsaved tune'}  ·  {log.metadata.test_type}  ·  quality {log.analysis.quality}"))
+        layout.addWidget(runs)
+        if compared["compatible"]:
+            layout.addWidget(Banner("These runs are comparable: same test, car and speed range.", "ok"))
+        else:
+            layout.addWidget(Banner(" ".join(compared["reasons"]), "warn"))
+
+        # Values in A's units; both logs store hp, Nm and psi, so one conversion fits both.
+        units = left.metadata.units
+        factors = _factors(units)
+        metrics = compared.get("metrics", {})
+        table = _table(len(metrics), ["Metric", "A", "B", "Difference"])
+        for row, (key, values) in enumerate(metrics.items()):
+            label, unit, factor_key = METRICS.get(key, (key.replace("_", " ").capitalize(), "", None))
+            unit = units.get(unit, DEFAULT_UNITS[unit]) if unit in DEFAULT_UNITS else unit
+            factor = factors[factor_key] if factor_key else 1.0
+            decimals = 2 if key in ("duration", "peak_boost") else 0
+            cells = (
+                f"{label} ({unit})" if unit else label,
+                f"{values['left'] * factor:.{decimals}f}",
+                f"{values['right'] * factor:.{decimals}f}",
+                f"{values['difference'] * factor:+.{decimals}f}",
+            )
+            for column, text in enumerate(cells):
+                table.setItem(row, column, QTableWidgetItem(text))
+        layout.addWidget(table, 1)

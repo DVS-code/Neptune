@@ -346,7 +346,7 @@ class TunesModule(FeatureModule):
         overwrite_button.clicked.connect(self._on_overwrite)
         actions.addWidget(overwrite_button)
 
-        duplicate_button = PrimaryButton("Duplicate & Edit")
+        duplicate_button = PrimaryButton("Duplicate && Edit")  # a single & is a keyboard mnemonic
         duplicate_button.clicked.connect(self._on_duplicate)
         actions.addWidget(duplicate_button)
 

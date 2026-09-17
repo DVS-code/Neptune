@@ -6,15 +6,14 @@ import os
 import time
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QVBoxLayout,
+    QWidget,
 )
+from qfluentwidgets import ComboBox, DoubleSpinBox
 
 from neptune import __version__
 from neptune.core import carnames
@@ -27,9 +26,9 @@ from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.dynooverlay import DynoOverlay
 from neptune.ui.logoverlay import LogOverlay
-from neptune.ui.widgets.buttons import PrimaryButton
+from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
-from neptune.ui.widgets.controls import Segmented
+from neptune.ui.widgets.controls import SectionHeading, Segmented
 from neptune.ui.widgets.dynograph import DynoGraph
 from neptune.ui.widgets.gearing import GearingChart
 from neptune.vehicle.vehicle import NM_RPM_TO_HP
@@ -335,7 +334,7 @@ class DynoModule(DragyModule):
         box.setText(f"Run Quality: {log.analysis.quality}")
         box.setInformativeText(f"{len(log.samples):,} samples · {log.analysis.duration or 0.0:.2f} s\n\n{reasons}")
         save = box.addButton("Save Log", QMessageBox.AcceptRole)
-        open_reader = box.addButton("Save & Open Reader", QMessageBox.ActionRole)
+        open_reader = box.addButton("Save && Open Reader", QMessageBox.ActionRole)  # a single & is a mnemonic
         box.addButton("Discard", QMessageBox.RejectRole)
         box.exec()
         clicked = box.clickedButton()
@@ -366,74 +365,71 @@ class DynoModule(DragyModule):
 
     def _generate_log(self) -> None:
         dialog = QDialog(self._window())
+        dialog.setObjectName("Root")  # the app background from theme.stylesheet(), not Fusion's grey
         dialog.setWindowTitle("Generate Neptune Log")
-        dialog.setMinimumWidth(520)
+        dialog.setMinimumWidth(600)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("Select a structured test. Neptune arms the run and detects its start/end conditions automatically."))
-        selector = QComboBox()
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+        layout.addWidget(
+            SectionHeading(
+                "Generate Neptune Log",
+                "Select a structured test. Neptune arms the run and detects its start/end conditions automatically.",
+            )
+        )
+        selector = ComboBox()
         selector.addItems(list(LOG_TESTS))
-        layout.addWidget(selector)
+        selector.setMinimumWidth(260)
+        layout.addWidget(FieldRow("Test", selector))
         procedure = QLabel()
+        procedure.setObjectName("RowHint")
         procedure.setWordWrap(True)
         layout.addWidget(procedure)
 
-        units_row = QHBoxLayout()
-        units_row.addWidget(QLabel("Output"))
-        output_units = QComboBox()
-        output_units.addItems(list(DYNO_UNITS))
-        output_units.setCurrentText(self._log_units.get("output", self._units))
-        units_row.addWidget(output_units, 1)
-        units_row.addWidget(QLabel("Speed"))
-        speed_units = QComboBox()
-        speed_units.addItems(["km/h", "mph"])
-        speed_units.setCurrentText(self._log_units.get("speed", self.settings.get("speed_unit")))
-        units_row.addWidget(speed_units)
-        units_row.addWidget(QLabel("Pressure"))
-        pressure_units = QComboBox()
-        pressure_units.addItems(["psi", "bar"])
-        pressure_units.setCurrentText(self._log_units.get("pressure", self.settings.get("pressure_unit")))
-        units_row.addWidget(pressure_units)
-        layout.addLayout(units_row)
+        output_units = Segmented(list(DYNO_UNITS), self._log_units.get("output", self._units))
+        layout.addWidget(FieldRow("Output", output_units))
+        speed_units = Segmented(["km/h", "mph"], self._log_units.get("speed", self.settings.get("speed_unit")))
+        layout.addWidget(FieldRow("Speed", speed_units))
+        pressure_units = Segmented(["psi", "bar"], self._log_units.get("pressure", self.settings.get("pressure_unit")))
+        layout.addWidget(FieldRow("Pressure", pressure_units))
 
-        custom_row = QHBoxLayout()
-        custom_row.addWidget(QLabel("Custom range"))
-        custom_start = QDoubleSpinBox()
+        custom_controls = QWidget()
+        custom_layout = QHBoxLayout(custom_controls)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(8)
+        custom_start = DoubleSpinBox()
         custom_start.setRange(0.0, 500.0)
         custom_start.setDecimals(1)
         custom_start.setSingleStep(1.0)
         custom_start.setValue(0.0)
-        custom_row.addWidget(custom_start)
-        custom_row.addWidget(QLabel("to"))
-        custom_end = QDoubleSpinBox()
+        custom_layout.addWidget(custom_start)
+        to_label = QLabel("to")
+        to_label.setObjectName("RowHint")
+        custom_layout.addWidget(to_label)
+        custom_end = DoubleSpinBox()
         custom_end.setRange(0.1, 500.0)
         custom_end.setDecimals(1)
         custom_end.setSingleStep(1.0)
         custom_end.setValue(60.0)
-        custom_row.addWidget(custom_end)
-        custom_unit = QComboBox()
-        custom_unit.addItems(["mph", "km/h"])
-        custom_unit.setCurrentText(speed_units.currentText())
-        custom_row.addWidget(custom_unit)
-        custom_row.addStretch(1)
-        layout.addLayout(custom_row)
+        custom_layout.addWidget(custom_end)
+        custom_unit = Segmented(["mph", "km/h"], speed_units.value())
+        custom_layout.addWidget(custom_unit)
+        # One row, so its label hides with the fields instead of staying behind on its own.
+        custom_row = FieldRow("Custom range", custom_controls)
+        layout.addWidget(custom_row)
 
         def update_procedure(label: str) -> None:
             procedure.setText(LOG_TESTS.get(label, (0, 0, ""))[2])
             visible = label == "Custom speed range"
-            for widget in (custom_start, custom_end, custom_unit):
-                widget.setVisible(visible)
+            custom_row.setVisible(visible)
             if visible:
-                custom_unit.setCurrentText(speed_units.currentText())
+                custom_unit.set_value(speed_units.value())
 
-        speed_units.currentTextChanged.connect(
-            lambda value: custom_unit.setCurrentText(value)
-        )
+        speed_units.changed.connect(custom_unit.set_value)
 
         selector.currentTextChanged.connect(update_procedure)
         update_procedure(selector.currentText())
-        buttons = QDialogButtonBox()
-        buttons.addButton("ARM", QDialogButtonBox.AcceptRole)
-        buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        layout.addStretch(1)
 
         def arm() -> None:
             if selector.currentText() == "Custom speed range" and custom_end.value() <= custom_start.value():
@@ -441,20 +437,26 @@ class DynoModule(DragyModule):
                 return
             dialog.accept()
 
-        buttons.accepted.connect(arm)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = Button("Cancel")
+        cancel.clicked.connect(dialog.reject)
+        buttons.addWidget(cancel)
+        arm_button = PrimaryButton("ARM")
+        arm_button.clicked.connect(arm)
+        buttons.addWidget(arm_button)
+        layout.addLayout(buttons)
         if dialog.exec() != QDialog.Accepted:
             return
         self._log_units = {
-            "output": output_units.currentText(),
-            "speed": speed_units.currentText(),
-            "pressure": pressure_units.currentText(),
+            "output": output_units.value(),
+            "speed": speed_units.value(),
+            "pressure": pressure_units.value(),
         }
         label = selector.currentText()
         start, end, _ = LOG_TESTS[label]
         if label == "Custom speed range":
-            custom_unit_value = custom_unit.currentText()
+            custom_unit_value = custom_unit.value()
             start = custom_start.value() / (O.MS_TO_MPH if custom_unit_value == "mph" else O.MS_TO_KPH)
             end = custom_end.value() / (O.MS_TO_MPH if custom_unit_value == "mph" else O.MS_TO_KPH)
         turbo = self._module("turbo")
@@ -468,7 +470,7 @@ class DynoModule(DragyModule):
             "units": dict(self._log_units),
         }
         if label == "Custom speed range":
-            self._capture_config["custom_unit"] = custom_unit.currentText()
+            self._capture_config["custom_unit"] = custom_unit.value()
         self._capture_samples = []
         self._capture_last_speed = None
         self._capture_last_throttle = None

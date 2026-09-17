@@ -538,6 +538,7 @@ class TurboModule(FeatureModule):
             from neptune.ui.boostmapworkspace import BoostMapWorkspace
 
             self._map_dialog = QDialog()
+            self._map_dialog.setObjectName("Root")  # the app background, not Fusion's grey
             self._map_dialog.setWindowTitle("Boost Map 2.0")
             self._map_dialog.resize(980, 620)
             self._map_workspace = BoostMapWorkspace(

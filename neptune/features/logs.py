@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView, QLabel, QListWidget, QListWidgetItem, QMessageBox
+from PySide6.QtWidgets import QAbstractItemView, QLabel, QListWidgetItem, QMessageBox
+from qfluentwidgets import ListWidget
 
 from neptune.core import logs as log_store
 from neptune.core.module import FeatureModule
@@ -107,6 +108,7 @@ class LogsModule(FeatureModule):
         workspace = BoostMapWorkspace(values, rows, max_rpm, self._window(), editable=False)
         # A parented QWidget draws inside its parent; the flag makes it a window of its own.
         workspace.setWindowFlag(Qt.Window, True)
+        workspace.setObjectName("Root")  # the app background, not Fusion's grey
         workspace.setAttribute(Qt.WA_DeleteOnClose, True)
         workspace.setWindowTitle(f"Boost Map overlay — {log.metadata.car.friendly_name or 'logged car'}")
         workspace.map.set_log_overlay(*log_store.boost_map_path(log.samples, max_rpm, rows))
@@ -137,15 +139,16 @@ class LogsModule(FeatureModule):
         open_button = PrimaryButton("Open Log Reader")
         open_button.clicked.connect(lambda: self.open_reader(self._selected_path()))
         intro.add(open_button)
-        intro.add(
-            QLabel(
-                "A loaded log keeps its car identity, tune revision, transmission setup, samples, event "
-                "markers and run-quality reasons together."
-            )
+        about = QLabel(
+            "A loaded log keeps its car identity, tune revision, transmission setup, samples, event "
+            "markers and run-quality reasons together."
         )
+        about.setObjectName("RowHint")
+        about.setWordWrap(True)
+        intro.add(about)
 
         card = page.add_card("Saved runs")
-        listing = QListWidget()
+        listing = ListWidget()
         listing.setMinimumHeight(250)
         listing.setSelectionMode(QAbstractItemView.ExtendedSelection)
         listing.itemDoubleClicked.connect(lambda _item: self.open_reader(self._selected_path()))
