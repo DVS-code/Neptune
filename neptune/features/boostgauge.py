@@ -185,10 +185,22 @@ class BoostGaugeModule(FeatureModule):
         if self._overlay is not None:
             self._overlay.set_size(self._size)
 
-    def build_page(self, page) -> None:
-        show_card = page.add_card("Gauge")
+    def build_page(self, page, container=None) -> None:
+        """Build the gauge controls, optionally inside a parent card.
 
-        enabled = ToggleRow("Show the gauge", False, hint=HINT_SHOW)
+        DYNO owns the gauge now, so passing its Boost Gauge card keeps the
+        related controls together without changing the standalone API.
+        """
+        def add_card(title: str, caption: str = ""):
+            if container is None:
+                return page.add_card(title, caption)
+            if title != "Gauge":
+                container.add_divider()
+            return container
+
+        show_card = add_card("Gauge")
+
+        enabled = ToggleRow("Show the gauge", self._enabled, hint=HINT_SHOW)
         enabled.toggle.toggled_value.connect(self._on_enabled)
         self._widgets["enabled"] = enabled
         show_card.add(enabled)
@@ -198,7 +210,7 @@ class BoostGaugeModule(FeatureModule):
         self._widgets["mode"] = mode
         show_card.add(FieldRow("Style", mode))
 
-        style_card = page.add_card("Look")
+        style_card = add_card("Look")
 
         preview_row = QHBoxLayout()
         preview_row.addStretch(1)
@@ -236,7 +248,7 @@ class BoostGaugeModule(FeatureModule):
         self._widgets["gear"] = gear
         style_card.add(gear)
 
-        place_card = page.add_card("Placement", HINT_POSITION)
+        place_card = add_card("Placement", HINT_POSITION)
 
         size = SliderRow(
             "Size", MIN_SIZE, MAX_SIZE, DEFAULT_SIZE, step=10, decimals=0, unit="px", hint=HINT_SIZE
@@ -254,7 +266,7 @@ class BoostGaugeModule(FeatureModule):
         reset.clicked.connect(lambda: self._jump_to(*DEFAULT_POSITION))
         place_card.add(reset)
 
-        scale_card = page.add_card("Scale")
+        scale_card = add_card("Scale")
         auto = ToggleRow("Match the car", True, hint=HINT_AUTO_RANGE)
         auto.toggle.toggled_value.connect(self._on_auto_range)
         self._widgets["auto_range"] = auto
@@ -262,7 +274,7 @@ class BoostGaugeModule(FeatureModule):
 
         banner = Banner(NOTE_OFFLINE, "info")
         self._widgets["banner"] = banner
-        page.add(banner)
+        (container.add if container is not None else page.add)(banner)
 
         self._restyle()
 
@@ -321,7 +333,7 @@ class BoostGaugeModule(FeatureModule):
     def load_state(self, data: dict) -> None:
         """Apply a saved gauge setup.
 
-        ⚠️ A preset is a file on disk, so every field is untrusted. A bare `int()` on a
+        A preset is a file on disk, so every field is untrusted. A bare `int()` on a
         hand-edited `size` used to raise and abandon the load part-way, leaving the gauge
         with some settings applied and the rest stale. Every field falls back to its
         default instead — the same rule the engine and suspension pages already follow.

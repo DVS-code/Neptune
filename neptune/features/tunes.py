@@ -1,6 +1,8 @@
-"""Tunes: saved engine and turbo setups for the car you are driving."""
+"""Tunes: saved engine, turbo and transmission setups for the car you are driving."""
 
 from __future__ import annotations
+
+from copy import deepcopy
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QListWidgetItem
 from qfluentwidgets import LineEdit, ListWidget
@@ -23,7 +25,7 @@ NOTE_NO_CAR = "Drive out into the world and Neptune will pick up your car."
 class TunesModule(FeatureModule):
     name = "tunes"
     title = "Tunes"
-    subtitle = "Save engine and turbo setups per car and switch between them."
+    subtitle = "Save complete vehicle tunes per car and switch between revisions."
     icon = "tunes.png"
     group = "Vehicle"
     order = 50
@@ -39,6 +41,7 @@ class TunesModule(FeatureModule):
         self._message = ""
         self._message_ok = True
         self._dirty = True
+        self._select_row: int | None = None  # row to select once the list is rebuilt
         self._widgets: dict = {}
 
     def binding(self) -> dict | None:
@@ -72,7 +75,7 @@ class TunesModule(FeatureModule):
         """
         if vehicle is None or not self._key or self.store.car_name(self._key):
             return
-        name = carnames.pretty(vehicle.media_name)
+        name = carnames.label(vehicle.media_name, vehicle.car_id, "")
         if name:
             self.store.set_car_name(self._key, name)
 
@@ -106,6 +109,78 @@ class TunesModule(FeatureModule):
             if captured:
                 state[name] = captured
         return state
+
+    def current_tune(self) -> dict | None:
+        """Return the active tune metadata for log/revision relationships."""
+        if not self._key:
+            return None
+        index = self.store.active_index(self._key)
+        return self.store.tune(self._key, index)
+
+    def log_revision(self, log) -> tuple[int, str]:
+        """(index, "") of the attached car's tune a log was recorded with, or (-1, why not)."""
+        if log is None or not self._key:
+            return -1, "Attach the car that produced this log first."
+        logged_key = log.metadata.car.tune_key
+        if logged_key and logged_key != self._key:
+            return -1, "This log belongs to a different car. Attach that car first."
+        metadata = log.metadata
+        index = self.store.find_revision(self._key, metadata.tune_id, metadata.tune_name, metadata.tune_revision)
+        if index < 0:
+            return -1, "The tune revision recorded in this log is not in this car's store."
+        return index, ""
+
+    def open_log_revision(self, log, duplicate: bool = False) -> tuple[bool, str]:
+        """Select or duplicate the tune revision associated with an offline log."""
+        index, message = self.log_revision(log)
+        if index < 0:
+            return False, message
+        if duplicate:
+            ok, message, created = self.store.duplicate_tune(self._key, index)
+            if ok:
+                self._select_row = created
+                self._dirty = True
+            return ok, message
+        self._select_row = index
+        self._dirty = True
+        return True, "Logged tune revision selected. Duplicate it before changing a recorded revision."
+
+    def apply_suggestion_from_log(self, log, suggestion, selected_indices=None) -> tuple[bool, str]:
+        """Preview-approved suggestion application; always creates a new revision first."""
+        index, message = self.log_revision(log)
+        if index < 0:
+            return False, message
+        patches = list(suggestion.proposal_patches) if suggestion is not None else []
+        if not patches:
+            return False, "This suggestion has no safe previewable proposal."
+        selected = set(range(len(patches)) if selected_indices is None else selected_indices)
+        state = deepcopy(self.store.tune(self._key, index).get("state") or {})
+
+        def merge(target: dict, patch: dict) -> None:
+            for key, value in patch.items():
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
+                    merge(target[key], value)
+                else:
+                    target[key] = deepcopy(value)
+
+        for patch_index, patch in enumerate(patches):
+            if patch_index in selected and isinstance(patch, dict):
+                merge(state, patch)
+        ok, message, created = self.store.duplicate_tune(self._key, index)
+        if not ok:
+            return False, message
+        ok, message = self.store.update_tune(self._key, created, state)
+        if not ok:
+            return False, message
+        self.store.add_change(self._key, created, f"Applied suggestion: {suggestion.title} — {suggestion.evidence}")
+        if not self._apply(created):
+            return False, "The new revision was saved but could not be applied to the live car."
+        self._notify(f'Applied suggestion as new revision "{self.store.tune(self._key, created).get("name", "")}".', True)
+        return True, self._message
+
+    @property
+    def current_car_key(self) -> str | None:
+        return self._key
 
     def _apply(self, index: int, announce: bool = True) -> bool:
         if not self._key:
@@ -192,6 +267,16 @@ class TunesModule(FeatureModule):
         ok, message = self.store.update_tune(self._key, index, self._capture())
         self._notify(message, ok)
 
+    def _on_duplicate(self) -> None:
+        index = self._selected_index()
+        if index < 0 or not self._key:
+            self._notify("Select a tune first.", False)
+            return
+        ok, message, created = self.store.duplicate_tune(self._key, index)
+        if ok:
+            self._select_row = created
+        self._notify(message, ok)
+
     def _on_delete(self) -> None:
         index = self._selected_index()
         if index < 0:
@@ -225,9 +310,9 @@ class TunesModule(FeatureModule):
 
         save_card = page.add_card(
             "Save current setup",
-            "Captures both tabs in full: torque, rev limit, launch and speed cap from "
-            "Engine, and every boost setting from Turbo — including boost by gear and "
-            "the boost map.",
+            "Captures three tabs in full: torque, rev limit, launch and speed cap from "
+            "Engine, every boost setting from Turbo — including boost by gear and "
+            "the boost map — and the final drive and forward-gear ratios from Transmission.",
         )
         save_row = QHBoxLayout()
         save_row.setSpacing(8)
@@ -260,6 +345,10 @@ class TunesModule(FeatureModule):
         overwrite_button = Button("Overwrite")
         overwrite_button.clicked.connect(self._on_overwrite)
         actions.addWidget(overwrite_button)
+
+        duplicate_button = PrimaryButton("Duplicate & Edit")
+        duplicate_button.clicked.connect(self._on_duplicate)
+        actions.addWidget(duplicate_button)
 
         delete_button = DangerButton("Delete")
         delete_button.clicked.connect(self._on_delete)
@@ -300,16 +389,25 @@ class TunesModule(FeatureModule):
 
         name = self.store.car_name(self._key)
         if not name and self.vehicle is not None:
-            name = carnames.pretty(self.vehicle.media_name)
+            name = carnames.label(
+                self.vehicle.media_name,
+                self.vehicle.car_id,
+                "",
+            )
         car_label.setText(name or "Unnamed car")
 
-        current = listing.currentRow()
+        current = self._select_row if self._select_row is not None else listing.currentRow()
+        self._select_row = None
         listing.clear()
         active = self.store.active_index(self._key)
         for index, tune in enumerate(self.store.tunes_for(self._key)):
             mark = ACTIVE_MARK if index == active else INACTIVE_MARK
-            item = QListWidgetItem(f"{mark}   {tune.get('name', '')}")
-            listing.addItem(item)
+            name = tune.get("name", "")
+            revision = f"V{tune.get('revision')}" if tune.get("revision") else ""
+            # Duplicates are already named "... V2"; don't print the revision twice.
+            suffix = f"  {revision}" if revision and not name.endswith(revision) else ""
+            logged = "  · logged" if tune.get("logs") else ""
+            listing.addItem(QListWidgetItem(f"{mark}   {name}{suffix}{logged}"))
         if 0 <= current < listing.count():
             listing.setCurrentRow(current)
 
@@ -317,6 +415,6 @@ class TunesModule(FeatureModule):
             if self._message:
                 banner.set(self._message, "ok" if self._message_ok else "error")
             elif listing.count() == 0:
-                banner.set("Set up the Engine and Turbo tabs, then save that as a tune.", "info")
+                banner.set("Set up the Engine, Turbo and Transmission tabs, then save that as a tune.", "info")
             else:
                 banner.setVisible(False)

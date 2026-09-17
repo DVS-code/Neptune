@@ -408,8 +408,15 @@ class DragyModule(FeatureModule):
         self._overlay.start(pid)
         return self._overlay
 
-    def build_page(self, page) -> None:
-        run_card = page.add_card("Run", "Pick the two speeds to time between.")
+    @staticmethod
+    def _add_card(page, title: str, caption: str = "", card_sink: list | None = None):
+        card = page.add_card(title, caption)
+        if card_sink is not None:
+            card_sink.append(card)
+        return card
+
+    def build_page(self, page, card_sink: list | None = None) -> None:
+        run_card = self._add_card(page, "Run", "Pick the two speeds to time between.", card_sink)
 
         mode = Segmented(list(MODES), self._mode)
         mode.changed.connect(self._set_mode)
@@ -483,7 +490,7 @@ class DragyModule(FeatureModule):
         reset_button.clicked.connect(self.reset)
         run_card.add(reset_button)
 
-        result_card = page.add_card("Result")
+        result_card = self._add_card(page, "Result", card_sink=card_sink)
         stats = StatStrip()
         stats.add("time", "Time", "--")
         stats.add("run", "Run", self._label())
@@ -497,7 +504,7 @@ class DragyModule(FeatureModule):
         self._widgets["banner"] = banner
         result_card.add(banner)
 
-        history_card = page.add_card("Recent runs", "Your last five finished runs.")
+        history_card = self._add_card(page, "Recent runs", "Your last five finished runs.", card_sink)
         rows = []
         for index in range(HISTORY_LENGTH):
             row = QLabel("")
@@ -510,7 +517,7 @@ class DragyModule(FeatureModule):
         clear_button.clicked.connect(self._clear_history)
         history_card.add(clear_button)
 
-        overlay_card = page.add_card("Overlay")
+        overlay_card = self._add_card(page, "Overlay", card_sink=card_sink)
         overlay = ToggleRow("Show on top of the game", False, hint=HINT_OVERLAY)
         overlay.toggle.toggled_value.connect(self.set_overlay)
         self._widgets["overlay"] = overlay

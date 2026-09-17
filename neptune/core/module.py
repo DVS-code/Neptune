@@ -60,6 +60,15 @@ class FeatureModule:
     def refresh(self, vehicle: Vehicle | None) -> None:
         """Update live readouts. Runs on the interface thread."""
 
+    def needs_refresh(self) -> bool:
+        """Whether this module needs refreshes while its page is hidden.
+
+        Most modules only need work when their page is selected.  A module may
+        opt in while it owns a live overlay or an armed capture without paying
+        the old ``always_refresh`` cost for its entire lifetime.
+        """
+        return bool(self.always_refresh)
+
     def save_state(self) -> dict:
         """Serialise user-facing settings for a preset."""
         return {}
@@ -74,6 +83,8 @@ class FeatureModule:
 
 class ModuleRegistry:
     """Holds registered modules and fans lifecycle events out to them."""
+
+    MAX_ERRORS = 64
 
     def __init__(self):
         self._modules: list[FeatureModule] = []
@@ -107,6 +118,8 @@ class ModuleRegistry:
             try:
                 handler(*args)
             except Exception as error:
+                if len(self._errors) >= self.MAX_ERRORS:
+                    del self._errors[: len(self._errors) - self.MAX_ERRORS + 1]
                 self._errors.append(f"{module.title}: {error}")
 
     def take_errors(self) -> list[str]:

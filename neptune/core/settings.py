@@ -26,6 +26,11 @@ DEFAULTS = {
     "hydraulics_volume": 70,
     "check_for_updates": True,
     "skip_update_version": "",
+    "tuning_assistant": False,
+    # Page master switches, remembered between sessions.
+    "suspension_enabled": False,
+    "dyno_enabled": False,
+    "transmission_enabled": False,
     "bindings": {},
 }
 
@@ -92,14 +97,7 @@ class Settings:
 
     def save(self) -> bool:
         with self._lock:
-            try:
-                temporary = self.path + ".tmp"
-                with open(temporary, "w", encoding="utf-8") as handle:
-                    json.dump(self._data, handle, indent=2)
-                os.replace(temporary, self.path)
-                return True
-            except OSError:
-                return False
+            return paths.write_json(self.path, self._data)
 
     def get(self, key: str, fallback=None):
         with self._lock:
@@ -112,6 +110,11 @@ class Settings:
             O.set_atmospheric_psi(value)
         self.save()
         self._notify(key)
+
+    def remember(self, key: str, value) -> None:
+        """`set`, skipped when the value is already stored: `set` rewrites settings.json every call."""
+        if self.get(key) != value:
+            self.set(key, value)
 
     def binding(self, key: str) -> dict | None:
         stored = self.get("bindings", {}) or {}

@@ -96,6 +96,21 @@ class ToggleRow(QWidget):
         self.toggle.set_value(checked, notify)
 
 
+def bind_progressive(toggle_row: ToggleRow, *details: QWidget) -> None:
+    """Show detailed controls only while their feature's toggle is on.
+
+    Follows the shown state, so a preset or tune that sets the toggle silently updates the page
+    too, and no page needs its own visibility bookkeeping.
+    """
+
+    def sync(enabled: bool) -> None:
+        for widget in details:
+            widget.setVisible(bool(enabled))
+
+    toggle_row.toggle.state_changed.connect(sync)
+    sync(toggle_row.value())
+
+
 class FieldRow(QWidget):
     def __init__(self, label: str, widget: QWidget, hint: str = "", parent=None):
         super().__init__(parent)

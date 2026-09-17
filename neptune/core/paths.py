@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import sys
 
@@ -42,6 +44,28 @@ def preset_dir() -> str:
     directory = os.path.join(data_dir(), "presets")
     os.makedirs(directory, exist_ok=True)
     return directory
+
+
+def write_json(path: str, data, compact: bool = False) -> bool:
+    """Write JSON through a temporary file, so a crash or bad value never truncates `path`.
+
+    `compact` drops the indentation for machine-only files: a two-minute log is ~40% smaller.
+    """
+    temporary = path + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        if compact:
+            text = json.dumps(data, separators=(",", ":"), allow_nan=False)
+        else:
+            text = json.dumps(data, indent=2, allow_nan=False)
+        with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text + "\n")
+        os.replace(temporary, path)
+        return True
+    except (OSError, TypeError, ValueError):
+        with contextlib.suppress(OSError):
+            os.remove(temporary)
+        return False
 
 
 def asset(name: str) -> str | None:

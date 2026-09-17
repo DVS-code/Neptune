@@ -270,7 +270,7 @@ class GameWindowTracker:
     ) -> tuple[int, int] | None:
         """Map a position inside the game's area to screen coordinates.
 
-        ⚠️ The fraction is measured against the DRAGGABLE SPAN (`width - overlay_width`), not the
+        The fraction is measured against the DRAGGABLE SPAN (`width - overlay_width`), not the
         full width, because that is what `GaugeOverlay._store_position` divides by. Using the full
         width here scaled every saved position up, so the clamp below pinned the gauge to the right
         and bottom edges — the "gauge sticks to the side of the screen" bug. The two functions must

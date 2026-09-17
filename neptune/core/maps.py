@@ -1,6 +1,6 @@
 """Per-car tune storage.
 
-A tune captures the engine and turbo settings for one car. Tunes are scoped to
+A tune captures the engine, turbo and transmission settings for one car. Tunes are scoped to
 the car they were saved on, so switching tunes never loads another car's setup.
 """
 
@@ -10,11 +10,15 @@ import json
 import os
 import re
 import threading
+import uuid
+from copy import deepcopy
 
 from neptune.core import paths
+from neptune.core.models import utc_now
 
+TUNED_MODULES = ("engine", "turbo", "transmission")
 
-TUNED_MODULES = ("engine", "turbo")
+STORE_SCHEMA = 2
 
 MAX_NAME_LENGTH = 40
 MAX_TUNES_PER_CAR = 12
@@ -24,6 +28,40 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9 _\-()]+")
 
 def clean_name(name: str) -> str:
     return _UNSAFE.sub("", (name or "").strip())[:MAX_NAME_LENGTH]
+
+
+def _migrate(stored: dict) -> dict:
+    """Bring legacy tune files forward without discarding unknown future keys."""
+    data = dict(stored)
+    try:
+        schema = int(data.get("schema", 1) or 1)
+    except (TypeError, ValueError, OverflowError):
+        schema = 1
+    # A file written by a newer Neptune keeps its own schema number.
+    data["schema"] = max(schema, STORE_SCHEMA)
+    cars = data.get("cars")
+    if not isinstance(cars, dict):
+        data["cars"] = {}
+        return data
+    for record in cars.values():
+        if not isinstance(record, dict):
+            continue
+        tunes = record.get("tunes")
+        if not isinstance(tunes, list):
+            record["tunes"] = []
+            continue
+        for tune in tunes:
+            if not isinstance(tune, dict):
+                continue
+            tune.setdefault("id", uuid.uuid4().hex)
+            tune.setdefault("revision", 1)
+            tune.setdefault("created_at", "")
+            tune.setdefault("modified_at", tune.get("created_at", ""))
+            tune.setdefault("results", {})
+            for field in ("logs", "changes"):
+                if not isinstance(tune.get(field), list):
+                    tune[field] = []
+    return data
 
 
 def car_key(fingerprint) -> str | None:
@@ -42,7 +80,7 @@ class TuneStore:
     def __init__(self, path: str | None = None):
         self.path = path or os.path.join(paths.data_dir(), "tunes.json")
         self._lock = threading.RLock()
-        self._data = {"cars": {}}
+        self._data = {"schema": STORE_SCHEMA, "cars": {}}
         self.load()
 
     def load(self) -> None:
@@ -51,20 +89,13 @@ class TuneStore:
                 with open(self.path, encoding="utf-8") as handle:
                     stored = json.load(handle)
                 if isinstance(stored, dict) and isinstance(stored.get("cars"), dict):
-                    self._data = stored
+                    self._data = _migrate(stored)
             except (OSError, ValueError):
-                self._data = {"cars": {}}
+                self._data = {"schema": STORE_SCHEMA, "cars": {}}
 
     def save(self) -> bool:
         with self._lock:
-            try:
-                temporary = self.path + ".tmp"
-                with open(temporary, "w", encoding="utf-8") as handle:
-                    json.dump(self._data, handle, indent=2)
-                os.replace(temporary, self.path)
-                return True
-            except OSError:
-                return False
+            return paths.write_json(self.path, self._data)
 
     def _car(self, key: str, create: bool = False) -> dict | None:
         cars = self._data.setdefault("cars", {})
@@ -125,11 +156,27 @@ class TuneStore:
             tunes = record.setdefault("tunes", [])
             for tune in tunes:
                 if tune.get("name", "").lower() == cleaned.lower():
+                    if tune.get("logs"):
+                        return False, "This revision has recorded logs; duplicate it before editing."
                     tune["state"] = state
+                    tune["modified_at"] = utc_now()
                     return self.save(), f'Updated "{cleaned}".'
             if len(tunes) >= MAX_TUNES_PER_CAR:
                 return False, f"This car already has {MAX_TUNES_PER_CAR} tunes."
-            tunes.append({"name": cleaned, "state": state})
+            now = utc_now()
+            tunes.append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": cleaned,
+                    "revision": 1,
+                    "created_at": now,
+                    "modified_at": now,
+                    "state": state,
+                    "logs": [],
+                    "results": {},
+                    "changes": [],
+                }
+            )
             record["active"] = len(tunes) - 1
             return self.save(), f'Saved "{cleaned}".'
 
@@ -138,7 +185,10 @@ class TuneStore:
             record = self._car(key)
             if not record or not 0 <= index < len(record.get("tunes", [])):
                 return False, "That tune no longer exists."
+            if record["tunes"][index].get("logs"):
+                return False, "This revision has recorded logs; duplicate it before editing."
             record["tunes"][index]["state"] = state
+            record["tunes"][index]["modified_at"] = utc_now()
             name = record["tunes"][index].get("name", "")
             return self.save(), f'Updated "{name}".'
 
@@ -151,7 +201,89 @@ class TuneStore:
             if not record or not 0 <= index < len(record.get("tunes", [])):
                 return False, "That tune no longer exists."
             record["tunes"][index]["name"] = cleaned
+            record["tunes"][index]["modified_at"] = utc_now()
             return self.save(), f'Renamed to "{cleaned}".'
+
+    def tune(self, key: str, index: int) -> dict | None:
+        record = self._car(key)
+        tunes = record.get("tunes", []) if record else []
+        return tunes[index] if 0 <= index < len(tunes) and isinstance(tunes[index], dict) else None
+
+    def find_revision(self, key: str, tune_id: str, name: str, revision: int | None) -> int:
+        """Index of the tune a log was recorded with: by id, else by name and revision. -1 if gone."""
+        tunes = self.tunes_for(key)
+        if tune_id:
+            for index, tune in enumerate(tunes):
+                if tune.get("id") == tune_id:
+                    return index
+        if name:
+            for index, tune in enumerate(tunes):
+                if tune.get("name") == name and tune.get("revision") == revision:
+                    return index
+        return -1
+
+    def duplicate_tune(self, key: str, index: int) -> tuple[bool, str, int]:
+        with self._lock:
+            record = self._car(key)
+            source = self.tune(key, index)
+            if not record or source is None:
+                return False, "That tune no longer exists.", -1
+            if len(record.get("tunes", [])) >= MAX_TUNES_PER_CAR:
+                return False, f"This car already has {MAX_TUNES_PER_CAR} tunes.", -1
+            revision = int(source.get("revision", 1) or 1) + 1
+            base = clean_name(f"{source.get('name', 'Tune')} V{revision}") or f"Tune V{revision}"
+            names = {item.get("name", "").lower() for item in record.get("tunes", [])}
+            candidate = base
+            suffix = 2
+            while candidate.lower() in names:
+                # Trim the base, not the suffix: clean_name() cuts at MAX_NAME_LENGTH, and a
+                # suffix cut off a 40-character name gave back the same name and looped forever.
+                tail = f" ({suffix})"
+                candidate = clean_name(base[: MAX_NAME_LENGTH - len(tail)] + tail)
+                suffix += 1
+            now = utc_now()
+            clone = deepcopy(source)
+            clone.update(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": candidate,
+                    "revision": revision,
+                    "created_at": now,
+                    "modified_at": now,
+                    "logs": [],
+                    "results": {},
+                    "changes": [{"summary": f"Duplicated from {source.get('name', 'previous revision')}"}],
+                }
+            )
+            record.setdefault("tunes", []).append(clone)
+            record["active"] = len(record["tunes"]) - 1
+            ok = self.save()
+            return ok, (f'Created "{candidate}".' if ok else "Could not save the duplicated tune."), record["active"]
+
+    def record_log(self, key: str, index: int, log_id: str, results: dict | None = None) -> bool:
+        with self._lock:
+            tune = self.tune(key, index)
+            if tune is None:
+                return False
+            logs = tune.setdefault("logs", [])
+            if log_id not in logs:
+                logs.append(log_id)
+            if isinstance(results, dict):
+                tune["results"] = dict(results)
+            tune["modified_at"] = utc_now()
+            return self.save()
+
+    def add_change(self, key: str, index: int, summary: str) -> bool:
+        """Append a bounded human-readable reason to a tune revision."""
+        with self._lock:
+            tune = self.tune(key, index)
+            if tune is None or not str(summary or "").strip():
+                return False
+            changes = tune.setdefault("changes", [])
+            changes.append({"summary": str(summary).strip()[:200], "at": utc_now()})
+            del changes[:-32]
+            tune["modified_at"] = utc_now()
+            return self.save()
 
     def delete_tune(self, key: str, index: int) -> tuple[bool, str]:
         with self._lock:

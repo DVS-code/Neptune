@@ -13,6 +13,10 @@ Selection: click a cell, drag to extend, shift-click to extend from the anchor. 
 
 from __future__ import annotations
 
+import math
+from contextlib import suppress
+from itertools import pairwise
+
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
@@ -76,6 +80,12 @@ class BoostMap(QWidget):
         self._cursor: tuple[int, int] | None = None
         self._dragging = False
         self._typed = ""
+        self._undo: list[tuple[int, list[float]]] = []
+        self._redo: list[tuple[int, list[float]]] = []
+        self._hit_counts: dict[tuple[int, int], int] = {}
+        self._logged_path: list[tuple[int, int]] = []
+        self._comparison: list[float] | None = None
+        self._logged_cursor: tuple[int, int] | None = None
 
     def rows(self) -> int:
         return self._rows
@@ -123,6 +133,62 @@ class BoostMap(QWidget):
         self._cells = table
         self.update()
 
+    def _push_history(self) -> None:
+        self._undo.append((self._rows, self.flat()))
+        if len(self._undo) > 50:
+            self._undo.pop(0)
+        self._redo.clear()
+
+    def _restore_snapshot(self, snapshot: tuple[int, list[float]]) -> None:
+        rows, values = snapshot
+        self.set_flat(values, rows)
+
+    def undo(self) -> None:
+        if not self._undo:
+            return
+        self._redo.append((self._rows, self.flat()))
+        self._restore_snapshot(self._undo.pop())
+        self.changed.emit()
+
+    def redo(self) -> None:
+        if not self._redo:
+            return
+        self._undo.append((self._rows, self.flat()))
+        self._restore_snapshot(self._redo.pop())
+        self.changed.emit()
+
+    def reset_selected(self) -> None:
+        self._apply_to_selection(lambda _value: DEFAULT_MULT)
+
+    def reset_map(self) -> None:
+        self._push_history()
+        self._cells = [[DEFAULT_MULT] * COLUMNS for _ in range(self._rows)]
+        self.update()
+        self.changed.emit()
+
+    def set_log_overlay(
+        self,
+        hit_counts: dict[tuple[int, int], int] | None = None,
+        path: list[tuple[int, int]] | None = None,
+    ) -> None:
+        self._hit_counts = dict(hit_counts or {})
+        self._logged_path = list(path or [])
+        self.update()
+
+    def set_log_cursor(self, cell) -> None:
+        if isinstance(cell, (list, tuple)) and len(cell) == 2:
+            try:
+                self._logged_cursor = (int(cell[0]), int(cell[1]))
+            except (TypeError, ValueError):
+                self._logged_cursor = None
+        else:
+            self._logged_cursor = None
+        self.update()
+
+    def set_comparison(self, values: list[float] | None = None) -> None:
+        self._comparison = list(values) if values is not None else None
+        self.update()
+
     def set_max_rpm(self, rpm: float) -> None:
         if rpm and rpm > 500:
             self._max_rpm = float(rpm)
@@ -146,6 +212,7 @@ class BoostMap(QWidget):
 
     def _apply_to_selection(self, function) -> None:
         cells = self._selection() or [(r, c) for r in range(self._rows) for c in range(COLUMNS)]
+        self._push_history()
         for row, column in cells:
             value = function(self._cells[row][column])
             self._cells[row][column] = max(MIN_MULT, min(MAX_MULT, value))
@@ -169,6 +236,7 @@ class BoostMap(QWidget):
         cells = self._selection()
         if len(cells) < 3:
             return
+        self._push_history()
         rows = sorted({r for r, _ in cells})
         columns = sorted({c for _, c in cells})
         if len(columns) >= 3:
@@ -197,6 +265,7 @@ class BoostMap(QWidget):
         columns = sorted({c for _, c in cells})
         if len(columns) < 3:
             return
+        self._push_history()
         for row in rows:
             source = list(self._cells[row])
             for column in columns[1:-1]:
@@ -207,9 +276,7 @@ class BoostMap(QWidget):
         self.changed.emit()
 
     def flatten(self) -> None:
-        self._cells = [[DEFAULT_MULT] * COLUMNS for _ in range(self._rows)]
-        self.update()
-        self.changed.emit()
+        self.reset_map()
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
@@ -307,10 +374,8 @@ class BoostMap(QWidget):
             return
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if self._typed:
-                try:
+                with suppress(ValueError):
                     self.set_selection(float(self._typed))
-                except ValueError:
-                    pass
                 self._typed = ""
             return
         if key == Qt.Key_Backspace:
@@ -352,6 +417,16 @@ class BoostMap(QWidget):
                 painter.setPen(QPen(QColor(0, 0, 0, 90), 1))
                 painter.drawRect(rect)
 
+                comparison_index = row * COLUMNS + column
+                if self._comparison is not None and comparison_index < len(self._comparison):
+                    try:
+                        different = abs(value - float(self._comparison[comparison_index])) > 0.01
+                    except (TypeError, ValueError, OverflowError):
+                        different = False
+                    if different:
+                        painter.setPen(QPen(QColor(T.WARN), 2, Qt.DashLine))
+                        painter.drawRect(rect.adjusted(2, 2, -2, -2))
+
                 painter.setFont(cell_font)
                 painter.setPen(QColor(240, 242, 246))
                 painter.drawText(rect, Qt.AlignCenter, f"{value:.2f}")
@@ -359,6 +434,27 @@ class BoostMap(QWidget):
         if live_cell is not None and live_cell[0] < self._rows and live_cell[1] < COLUMNS:
             painter.setPen(QPen(QColor(T.ACCENT_BRIGHT), 2))
             painter.drawRect(self._cell_rect(*live_cell).adjusted(1, 1, -1, -1))
+
+        for (row, column), count in self._hit_counts.items():
+            if not (0 <= row < self._rows and 0 <= column < COLUMNS):
+                continue
+            alpha = min(150, 25 + int(math.log2(max(1, count)) * 28))
+            painter.fillRect(self._cell_rect(row, column), QColor(74, 222, 128, alpha))
+
+        if self._logged_cursor is not None:
+            row, column = self._logged_cursor
+            if 0 <= row < self._rows and 0 <= column < COLUMNS:
+                painter.setPen(QPen(QColor(T.ACCENT_BRIGHT), 2))
+                painter.drawRect(self._cell_rect(row, column).adjusted(2, 2, -2, -2))
+
+        if len(self._logged_path) > 1:
+            painter.setPen(QPen(QColor(T.OK), 2))
+            points = []
+            for row, column in self._logged_path:
+                if 0 <= row < self._rows and 0 <= column < COLUMNS:
+                    points.append(self._cell_rect(row, column).center())
+            for first, second in pairwise(points):
+                painter.drawLine(first, second)
 
         if selection:
             rows = sorted({r for r, _ in selection})

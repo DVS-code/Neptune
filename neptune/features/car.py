@@ -7,7 +7,7 @@ game, so it has no restore path and cannot leave anything behind.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel
 
@@ -35,9 +35,10 @@ class CarModule(FeatureModule):
     group = "Vehicle"
     order = 45
 
-    def __init__(self, settings):
+    def __init__(self, settings, registry=None):
         super().__init__()
         self.settings = settings
+        self._registry = registry
         self._widgets: dict = {}
         self._last_car_id: int | None = None
         self._preview_token: int | None = None
@@ -73,6 +74,11 @@ class CarModule(FeatureModule):
         strip.add("name", "Name")
         strip.add("id", "Car ID")
         strip.add("engine", "Induction")
+        strip.add("tune", "Current tune")
+        strip.add("revision", "Revision")
+        strip.add("runs", "Logged runs")
+        strip.add("recent", "Recent log")
+        strip.add("result", "Last result")
         self._widgets["identity"] = strip
         identity.add(strip)
 
@@ -114,6 +120,31 @@ class CarModule(FeatureModule):
                 vehicle.blower_ceiling,
             ),
         )
+        tunes = self._registry.get("tunes") if self._registry is not None else None
+        current = tunes.current_tune() if tunes is not None else None
+        if current:
+            strip.set("tune", str(current.get("name") or "Unnamed"))
+            strip.set("revision", f"V{current.get('revision')}" if current.get("revision") else "--")
+            logs = current.get("logs") or []
+            strip.set("runs", str(len(logs)))
+            recent = str(logs[-1]) if logs else "--"
+            strip.set("recent", recent)
+            results = current.get("results") or {}
+            try:
+                if results.get("duration") is not None:
+                    strip.set("result", f"{float(results['duration']):.2f}s")
+                elif results.get("peak_power") is not None:
+                    strip.set("result", f"{float(results['peak_power']):.0f} hp")
+                else:
+                    strip.set("result", "--")
+            except (TypeError, ValueError, OverflowError):
+                strip.set("result", "--")
+        else:
+            strip.set("tune", "Unsaved")
+            strip.set("revision", "--")
+            strip.set("runs", "0")
+            strip.set("recent", "--")
+            strip.set("result", "--")
 
         if car_id != self._last_car_id:
             self._last_car_id = car_id
