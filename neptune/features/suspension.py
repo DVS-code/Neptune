@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
+from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
 from neptune.ui.widgets.controls import BindButton, SectionHeading, Segmented
@@ -45,6 +46,20 @@ HYDRAULICS_LIFT_MAX_M = 0.80
 HYDRAULICS_DEFAULT_LIFT_M = 0.20
 
 HYDRAULICS_SOUND_COOLDOWN = 0.10
+
+# Per-wheel grip scale fields. Both read ~0.985 (i.e. 1.00) on every tyre compound, so
+# scaling them multiplies whatever grip the fitted tyre already has and leaves the
+# compound's own character (drag, offroad, slick...) intact. Lateral = cornering,
+# longitudinal = straight-line. These are plain static floats, not the physics curves.
+GRIP_LATERAL = 0x0374
+GRIP_LONGITUDINAL = 0x0378
+GRIP_MIN = 1.0
+GRIP_MAX = 3.0
+GRIP_REAPPLY_INTERVAL = 1.0
+HINT_GRIP = "Scales tyre grip. 1.00x is stock, and the compound's own behaviour is kept."
+HINT_GRIP_LATERAL = "Cornering (lateral) grip."
+HINT_GRIP_LONGITUDINAL = "Straight-line (longitudinal) grip."
+HINT_GRIP_BOTH = "Sets both grips to the same value."
 
 HYDRAULICS_MANUAL_GROUPS = {
     "front": (0, 1),
@@ -188,6 +203,11 @@ class SuspensionModule(FeatureModule):
         self._enabled = bool(settings.get("suspension_enabled"))
         self._lowered = False
 
+        self._grip_lateral = 1.0
+        self._grip_longitudinal = 1.0
+        self._grip_stock: tuple[list[float], list[float]] | None = None
+        self._last_grip_reapply = 0.0
+
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._edge = inp.EdgeDetector()
@@ -262,6 +282,9 @@ class SuspensionModule(FeatureModule):
             for i in range(4)
         ]
         for key, value in (
+            ("grip_both", self._grip_lateral),
+            ("grip_lateral", self._grip_lateral),
+            ("grip_longitudinal", self._grip_longitudinal),
             ("front", self._front_percent),
             ("rear", self._rear_percent),
             ("drop", self._drop_percent),
@@ -386,6 +409,7 @@ class SuspensionModule(FeatureModule):
         self._capture_camber_stock(vehicle)
         self._capture_track_stock(vehicle)
         self._capture_toe_stock(vehicle)
+        self._capture_grip_stock(vehicle)
         self._check_rear_axle(vehicle)
         self._controls_dirty = True
 
@@ -465,6 +489,104 @@ class SuspensionModule(FeatureModule):
             return
         self.stock_track = curves
 
+    def _capture_grip_stock(self, vehicle) -> None:
+        """Snapshot the per-wheel grip scale so the multipliers can re-apply from stock."""
+        if vehicle is None:
+            self._grip_stock = None
+            return
+        base = vehicle.car + O.Wheels.BASE
+        lateral = [
+            vehicle.process.f32(base + i * O.Wheels.STRIDE + GRIP_LATERAL)
+            for i in range(WHEEL_COUNT)
+        ]
+        longitudinal = [
+            vehicle.process.f32(base + i * O.Wheels.STRIDE + GRIP_LONGITUDINAL)
+            for i in range(WHEEL_COUNT)
+        ]
+        if all(value is not None for value in lateral + longitudinal):
+            self._grip_stock = (lateral, longitudinal)
+        else:
+            self._grip_stock = None
+
+    def _write_grip(
+        self,
+        vehicle,
+        lateral: float | None = None,
+        longitudinal: float | None = None,
+    ) -> bool:
+        if vehicle is None or self._grip_stock is None:
+            return False
+        lateral_factor = self._grip_lateral if lateral is None else lateral
+        longitudinal_factor = self._grip_longitudinal if longitudinal is None else longitudinal
+        lateral_stock, longitudinal_stock = self._grip_stock
+        base = vehicle.car + O.Wheels.BASE
+        ok = True
+        for i in range(WHEEL_COUNT):
+            ok = (
+                vehicle.process.set_f32(
+                    base + i * O.Wheels.STRIDE + GRIP_LATERAL,
+                    lateral_stock[i] * lateral_factor,
+                )
+                and ok
+            )
+            ok = (
+                vehicle.process.set_f32(
+                    base + i * O.Wheels.STRIDE + GRIP_LONGITUDINAL,
+                    longitudinal_stock[i] * longitudinal_factor,
+                )
+                and ok
+            )
+        return ok
+
+    def _set_grip_lateral(self, value: float) -> None:
+        self._grip_lateral = max(GRIP_MIN, min(GRIP_MAX, float(value)))
+        if self.vehicle is not None:
+            self._write_grip(self.vehicle)
+
+    def _set_grip_longitudinal(self, value: float) -> None:
+        self._grip_longitudinal = max(GRIP_MIN, min(GRIP_MAX, float(value)))
+        if self.vehicle is not None:
+            self._write_grip(self.vehicle)
+
+    def _set_grip_both(self, value: float) -> None:
+        """Apply one multiplier to both grips at once."""
+        factor = max(GRIP_MIN, min(GRIP_MAX, float(value)))
+        self._grip_lateral = factor
+        self._grip_longitudinal = factor
+        for key in ("grip_lateral", "grip_longitudinal"):
+            slider = self._widgets.get(key)
+            if slider is not None:
+                slider.set_value(factor)
+        if self.vehicle is not None:
+            self._write_grip(self.vehicle)
+
+    def _reapply_grip_if_rebaked(self, vehicle) -> None:
+        """Re-apply the grip scale after the game rebuilds the tyre (car or compound change).
+
+        These fields are a global scale, so the stored base is always re-applied as-is and
+        never re-snapshotted — it cannot compound the way a curve rewrite could.
+        """
+        if vehicle is None or self._grip_stock is None:
+            return
+        if abs(self._grip_lateral - 1.0) < 1e-6 and abs(self._grip_longitudinal - 1.0) < 1e-6:
+            return
+        now = time.monotonic()
+        if now - self._last_grip_reapply < GRIP_REAPPLY_INTERVAL:
+            return
+        self._last_grip_reapply = now
+        lateral_stock, longitudinal_stock = self._grip_stock
+        base = vehicle.car + O.Wheels.BASE
+        live_lateral = vehicle.process.f32(base + GRIP_LATERAL)
+        live_longitudinal = vehicle.process.f32(base + GRIP_LONGITUDINAL)
+        if live_lateral is None or live_longitudinal is None:
+            return
+        if (
+            abs(live_lateral - lateral_stock[0] * self._grip_lateral) <= 1e-3
+            and abs(live_longitudinal - longitudinal_stock[0] * self._grip_longitudinal) <= 1e-3
+        ):
+            return
+        self._write_grip(vehicle)
+
     def on_car_changed(self, vehicle) -> None:
         self._cancel_hydraulics_no_restore()
         if self._bounce:
@@ -497,6 +619,7 @@ class SuspensionModule(FeatureModule):
         self._capture_camber_stock(vehicle)
         self._capture_track_stock(vehicle)
         self._capture_toe_stock(vehicle)
+        self._capture_grip_stock(vehicle)
         self._check_rear_axle(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
@@ -522,6 +645,7 @@ class SuspensionModule(FeatureModule):
         self._maybach.stop()
         self._cancel_ramp()
         self._cancel_camber_ramp()
+        self._grip_stock = None
         self.vehicle = None
 
     def restore(self) -> None:
@@ -566,6 +690,13 @@ class SuspensionModule(FeatureModule):
                 vehicle.set_toe(self.stock_toe)
             except Exception:
                 pass
+        if vehicle is not None and self._grip_stock is not None:
+            try:
+                self._write_grip(vehicle, 1.0, 1.0)
+            except Exception:
+                pass
+        self._grip_lateral = 1.0
+        self._grip_longitudinal = 1.0
         self._lowered = False
         self._front_percent = 0.0
         self._rear_percent = 0.0
@@ -595,6 +726,8 @@ class SuspensionModule(FeatureModule):
         self._cancel_camber_ramp()
         self._track = [None, None, None, None]
         self._toe = [None, None, None, None]
+        self._grip_lateral = 1.0
+        self._grip_longitudinal = 1.0
         self._controls_dirty = True
 
     def tick(self, vehicle) -> None:
@@ -643,6 +776,7 @@ class SuspensionModule(FeatureModule):
         self._reapply_camber_if_rebaked(vehicle)
         self._reapply_track_if_rebaked(vehicle)
         self._reapply_toe_if_rebaked(vehicle)
+        self._reapply_grip_if_rebaked(vehicle)
 
     def _reapply_if_rebaked(self, vehicle) -> None:
         """Re-apply ride height when the game has quietly put stock height back."""
@@ -1583,6 +1717,16 @@ class SuspensionModule(FeatureModule):
             start = self.vehicle.ride_height or self._target(self._lowered)
             self._start_ramp(start, self._target(self._lowered), SETTLE_SECONDS)
 
+    def _reset_grip(self) -> None:
+        self._grip_lateral = 1.0
+        self._grip_longitudinal = 1.0
+        for key in ("grip_both", "grip_lateral", "grip_longitudinal"):
+            slider = self._widgets.get(key)
+            if slider is not None:
+                slider.set_value(1.0)
+        if self.vehicle is not None:
+            self._write_grip(self.vehicle, 1.0, 1.0)
+
     def build_page(self, page) -> None:
         from neptune.ui.widgets.buttons import Button, PrimaryButton
 
@@ -1596,6 +1740,54 @@ class SuspensionModule(FeatureModule):
         self._widgets["enabled"] = enabled
         enable_card.add(enabled)
         feature_widgets = []
+
+        grip_card = page.add_card("Grip", HINT_GRIP)
+        both = SliderRow(
+            "Both",
+            GRIP_MIN,
+            GRIP_MAX,
+            1.0,
+            step=0.05,
+            decimals=2,
+            unit="x",
+            hint=HINT_GRIP_BOTH,
+        )
+        both.changed.connect(self._set_grip_both)
+        self._widgets["grip_both"] = both
+        grip_card.add(both)
+
+        lateral = SliderRow(
+            "Cornering",
+            GRIP_MIN,
+            GRIP_MAX,
+            1.0,
+            step=0.05,
+            decimals=2,
+            unit="x",
+            hint=HINT_GRIP_LATERAL,
+        )
+        lateral.changed.connect(self._set_grip_lateral)
+        self._widgets["grip_lateral"] = lateral
+        grip_card.add(lateral)
+
+        longitudinal = SliderRow(
+            "Straight-line",
+            GRIP_MIN,
+            GRIP_MAX,
+            1.0,
+            step=0.05,
+            decimals=2,
+            unit="x",
+            hint=HINT_GRIP_LONGITUDINAL,
+        )
+        longitudinal.changed.connect(self._set_grip_longitudinal)
+        self._widgets["grip_longitudinal"] = longitudinal
+        grip_card.add(longitudinal)
+
+        grip_reset = Button("Reset to stock grip")
+        grip_reset.clicked.connect(self._reset_grip)
+        grip_card.add(grip_reset)
+        feature_widgets.append(grip_card)
 
         height_card = page.add_card("Ride height", "Moves the height the car normally sits at.")
         feature_widgets.append(height_card)
@@ -2173,6 +2365,17 @@ class SuspensionModule(FeatureModule):
 
         self._update_hydraulics_visibility()
 
+        friction_card = page.add_card(
+            "Tire friction", "Live per-wheel slip/friction, as the game reports it."
+        )
+        friction = StatStrip()
+        friction.add("friction_fl", "Front Left", "--")
+        friction.add("friction_fr", "Front Right", "--")
+        friction.add("friction_rr", "Rear Right", "--")
+        friction.add("friction_rl", "Rear Left", "--")
+        self._widgets["friction"] = friction
+        friction_card.add(friction)
+
         live_card = page.add_card("Live")
         stats = StatStrip()
         stats.add("state", "State", "Stock")
@@ -2192,6 +2395,19 @@ class SuspensionModule(FeatureModule):
         stats = self._widgets.get("stats")
         if stats is None:
             return
+
+        friction = self._widgets.get("friction")
+        if friction is not None:
+            values = vehicle.wheel_read(O.Wheels.FRICTION) if vehicle is not None else None
+            if values and len(values) == WHEEL_COUNT:
+                for key, value in zip(
+                    ("friction_fl", "friction_fr", "friction_rr", "friction_rl"),
+                    values,
+                    strict=True,
+                ):
+                    friction.set(key, f"{value:.2f}", unit="")
+            else:
+                friction.reset()
 
         if self._controls_dirty:
             self._controls_dirty = False

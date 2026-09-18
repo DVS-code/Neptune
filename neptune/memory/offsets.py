@@ -122,6 +122,11 @@ class Wheels:
     TRAVEL = 0x0018
     LOAD = 0x0050
 
+    FRICTION = 0x0000
+    """Live per-wheel slip/friction state the physics recomputes every frame: zero at
+    rest, and it swings with cornering load (front and rear swap with turn direction).
+    Read-only — it is an output, not a settable base."""
+
     CAMBER_SIN = 0x0120
     CAMBER_COS = 0x0124
 
