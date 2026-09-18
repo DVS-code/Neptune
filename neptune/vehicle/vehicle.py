@@ -191,6 +191,19 @@ class Vehicle:
     def set_rev_ceiling(self, rpm: float) -> bool:
         return self._set_engine_rpm_field(O.EngineModel.MAX_CLAMP, rpm)
 
+    @property
+    def neg_clamp(self) -> float | None:
+        """The rpm where the torque curve cuts negative.
+
+        This is the limiter's hard cut. Raising only ``MAX_CLAMP`` (the curve's upper
+        sampling bound) leaves the engine still cutting here, which is why the rev-limit
+        slider had no effect in game.
+        """
+        return self._engine_rpm_field(O.EngineModel.NEG_CLAMP)
+
+    def set_neg_clamp(self, rpm: float) -> bool:
+        return self._set_engine_rpm_field(O.EngineModel.NEG_CLAMP, rpm)
+
     def set_curve_count(self, count: int) -> bool:
         """Set the number of live torque-curve samples after validation."""
         count = int(count)

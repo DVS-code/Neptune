@@ -183,6 +183,8 @@ class EngineModule(FeatureModule):
         self.stock_curve: list[float] = []
         self.stock_ceiling: float | None = None
         self.stock_redline: float | None = None
+        self.stock_thresh: float | None = None
+        self.stock_neg_clamp: float | None = None
 
         self._torque_multiplier = 1.0
         self._rev_limit: float | None = None
@@ -312,6 +314,11 @@ class EngineModule(FeatureModule):
         if self._rev_limit is None:
             self.stock_ceiling = vehicle.rev_ceiling
             self.stock_redline = vehicle.redline
+            # The limiter is three engine-model fields, not one: MAX_CLAMP bounds the curve,
+            # THRESH is where it cuts/shifts, NEG_CLAMP is the hard cut. Capture all three so
+            # the slider can raise them together and put them back.
+            self.stock_thresh = vehicle.shift_threshold
+            self.stock_neg_clamp = vehicle.neg_clamp
         self._controls_dirty = True
 
     def on_car_changed(self, vehicle) -> None:
@@ -374,8 +381,7 @@ class EngineModule(FeatureModule):
         if vehicle is None or not self.stock_curve:
             return
         self._write_curve(self.stock_curve)
-        if self.stock_ceiling:
-            vehicle.set_rev_ceiling(self.stock_ceiling)
+        self._write_rev_limits(vehicle, None)
 
     def reset_controls(self) -> None:
         self._armed = False
@@ -725,15 +731,30 @@ class EngineModule(FeatureModule):
             body.append(max(0.05, last + slope * step))
         return body + [limiter_tail]
 
+    def _write_rev_limits(self, vehicle, rpm: float | None) -> None:
+        """Set the three fields the limiter lives in, or restore the captured stock values.
+
+        MAX_CLAMP on its own is not the limiter; it is the upper bound the torque curve is
+        sampled to. THRESH is where the engine cuts, and NEG_CLAMP is the hard cut. Writing
+        only MAX_CLAMP is why the rev-limit slider did nothing in game.
+        """
+        if rpm is None:
+            if self.stock_ceiling:
+                vehicle.set_rev_ceiling(self.stock_ceiling)
+            if self.stock_thresh:
+                vehicle.set_shift_threshold(self.stock_thresh)
+            if self.stock_neg_clamp:
+                vehicle.set_neg_clamp(self.stock_neg_clamp)
+            return
+        vehicle.set_rev_ceiling(rpm)
+        vehicle.set_shift_threshold(rpm)
+        vehicle.set_neg_clamp(rpm)
+
     def _apply_rev_ceiling(self) -> None:
         vehicle = self.vehicle
         if vehicle is None:
             return
-        if self._rev_limit is None:
-            if self.stock_ceiling:
-                vehicle.set_rev_ceiling(self.stock_ceiling)
-        else:
-            vehicle.set_rev_ceiling(self._rev_limit)
+        self._write_rev_limits(vehicle, self._rev_limit)
 
     def _apply_rev_limit(self) -> None:
         self._apply_curve()
