@@ -219,6 +219,12 @@ QLabel#StatusText {{
     color: {TEXT_MUTED};
 }}
 
+QLabel#CarName {{
+    font-size: {SIZE_CAPTION}px;
+    font-weight: 600;
+    color: {TEXT};
+}}
+
 QLabel#StatCaption {{
     font-family: {FONT_SMALL};
     font-size: {SIZE_CAPTION}px;

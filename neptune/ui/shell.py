@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from neptune.core import paths
+from neptune.core import carnames, paths
 from neptune.core.module import ModuleRegistry
 from neptune.core.runtime import STATE_DETACHED, STATE_READY, STATE_WAITING, Runtime
+from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.page import Page
 from neptune.ui.widgets.buttons import Button
@@ -180,6 +181,11 @@ class Shell(QWidget):
         layout.addStretch(1)
         layout.addLayout(self._nav_layout)
         layout.addStretch(1)
+
+        self.car_name = QLabel("No car loaded")
+        self.car_name.setObjectName("CarName")
+        self.car_name.setContentsMargins(4, 0, 4, 6)
+        layout.addWidget(self.car_name)
 
         status_row = QHBoxLayout()
         status_row.setContentsMargins(4, 0, 4, 0)
@@ -374,6 +380,7 @@ class Shell(QWidget):
             self._paint_attach_icon(self.runtime.attached)
 
         vehicle = self.runtime.vehicle
+        self._update_car_name(vehicle)
         current = self.stack.currentIndex()
         for module in self.registry:
             if not (self._pages.get(module.name) == current or module.needs_refresh()):
@@ -382,6 +389,15 @@ class Shell(QWidget):
                 module.refresh(vehicle)
             except Exception:
                 continue
+
+    def _update_car_name(self, vehicle) -> None:
+        """Show the loaded car's real name above the status, so a car change is obvious."""
+        if vehicle is None:
+            self._set_text(self.car_name, "No car loaded")
+            return
+        record = vehicle.car_config
+        car_id = vehicle.process.i32(record + O.CarConfig.CAR_ID) if record else None
+        self._set_text(self.car_name, carnames.label(vehicle.media_name, car_id, "--"))
 
     def _enable_dark_titlebar(self) -> None:
         if sys.platform != "win32":
