@@ -73,8 +73,9 @@ LAUNCH_HANDOFF_MAX_ASSIST = 0.65
 
 HINT_TORQUE = "Multiplies engine torque across the whole rev range."
 HINT_REV = (
-    "Where the car limits and shifts up. Raising extends the validated torque curve with a "
-    "conservative high-rpm taper so the selected redline is real."
+    "Changes the rev limiter. For automatic transmission the shift points will stay the "
+    "same, so manual shifting is recommended. To apply the rev limiter change you must "
+    "reset car position."
 )
 HINT_ANTILAG = "Hold the bound control to sit on the limiter and build boost. Release to launch."
 HINT_SPEED_CAP = "Anti-lag releases past this speed, like a launch control."
@@ -107,6 +108,10 @@ HINT_CAM_FADE = "How long the cam takes to return after the pedal passes the 25%
 HINT_LC = (
     "The game stores launch control as a normalized RPM window. The sliders are percentages "
     "of the engine band; 30% start and 80% limit are the stock values found in this build."
+)
+HINT_LAUNCH_ARM = (
+    "Arms the hold control. Turning it off releases the launch immediately and stops "
+    "Neptune building boost during it."
 )
 NOTE_LAUNCH_GAME_LC = (
     "Leave the game's launch control ON (Settings > Difficulty) \u2014 "
@@ -183,6 +188,8 @@ class EngineModule(FeatureModule):
         self.stock_curve: list[float] = []
         self.stock_ceiling: float | None = None
         self.stock_redline: float | None = None
+        self.stock_thresh: float | None = None
+        self.stock_neg_clamp: float | None = None
 
         self._torque_multiplier = 1.0
         self._rev_limit: float | None = None
@@ -306,12 +313,16 @@ class EngineModule(FeatureModule):
         if vehicle is None:
             return
         self.stock_curve = vehicle.curve()
-        # Validated in game: this car-level field is the live idle-control input, and the
         # game mirrors it into the engine model field.
         self._cam_idle_stock_rpm = vehicle.idle_rpm
         if self._rev_limit is None:
             self.stock_ceiling = vehicle.rev_ceiling
             self.stock_redline = vehicle.redline
+            # The limiter is three engine-model fields, not one: MAX_CLAMP bounds the curve,
+            # THRESH is where it cuts/shifts, NEG_CLAMP is the hard cut. Capture all three so
+            # the slider can raise them together and put them back.
+            self.stock_thresh = vehicle.shift_threshold
+            self.stock_neg_clamp = vehicle.neg_clamp
         self._controls_dirty = True
 
     def on_car_changed(self, vehicle) -> None:
@@ -320,13 +331,19 @@ class EngineModule(FeatureModule):
         self._ready = False
         self._launch_engaged = False
         self._cancel_launch_handoff()
-        self._torque_multiplier = 1.0
+        # The torque multiplier is a RELATIVE factor, so it carries across cars: it
+        # re-applies to the new car's own stock curve. Everything below it is absolute
+        # and car-specific (an rpm, a hand-shaped curve), so it is dropped.
         self._rev_limit = None
         self._custom_curve = None
         self._pending_edits.clear()
         self._cam_enabled = False
         self._cam.reset()
         self.on_attach(vehicle)
+        # on_attach has just captured the NEW car's stock curve, so applying now scales
+        # that curve rather than carrying the old car's absolute values across.
+        if abs(self._torque_multiplier - 1.0) > 1e-6:
+            self._apply_curve()
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -374,8 +391,7 @@ class EngineModule(FeatureModule):
         if vehicle is None or not self.stock_curve:
             return
         self._write_curve(self.stock_curve)
-        if self.stock_ceiling:
-            vehicle.set_rev_ceiling(self.stock_ceiling)
+        self._write_rev_limits(vehicle, None)
 
     def reset_controls(self) -> None:
         self._armed = False
@@ -472,15 +488,7 @@ class EngineModule(FeatureModule):
                 self._turbo.ramp_turbine()
 
     def _tick_launch(self, vehicle) -> bool:
-        """Spool the turbo while held and bridge the release into the launch.
-
-        The GAME's own launch control holds the rpm - we do not touch the rev
-        wall at all. All this does is ramp the turbine to its ceiling so the
-        launch happens on full boost instead of whatever the game spools on its
-        own. On release, a short handoff supports the low/mid-RPM curve while
-        the drivetrain loads, preventing the measured drop-and-recovery.
-        Returns True while it owns the tick.
-        """
+        """Spool the turbo while held and bridge the release into the launch."""
         if not inp.is_down(self.launch_binding()):
             if self._launch_engaged:
                 self._launch_engaged = False
@@ -725,15 +733,30 @@ class EngineModule(FeatureModule):
             body.append(max(0.05, last + slope * step))
         return body + [limiter_tail]
 
+    def _write_rev_limits(self, vehicle, rpm: float | None) -> None:
+        """Set the three fields the limiter lives in, or restore the captured stock values.
+
+        MAX_CLAMP on its own is not the limiter; it is the upper bound the torque curve is
+        sampled to. THRESH is where the engine cuts, and NEG_CLAMP is the hard cut. Writing
+        only MAX_CLAMP is why the rev-limit slider did nothing in game.
+        """
+        if rpm is None:
+            if self.stock_ceiling:
+                vehicle.set_rev_ceiling(self.stock_ceiling)
+            if self.stock_thresh:
+                vehicle.set_shift_threshold(self.stock_thresh)
+            if self.stock_neg_clamp:
+                vehicle.set_neg_clamp(self.stock_neg_clamp)
+            return
+        vehicle.set_rev_ceiling(rpm)
+        vehicle.set_shift_threshold(rpm)
+        vehicle.set_neg_clamp(rpm)
+
     def _apply_rev_ceiling(self) -> None:
         vehicle = self.vehicle
         if vehicle is None:
             return
-        if self._rev_limit is None:
-            if self.stock_ceiling:
-                vehicle.set_rev_ceiling(self.stock_ceiling)
-        else:
-            vehicle.set_rev_ceiling(self._rev_limit)
+        self._write_rev_limits(vehicle, self._rev_limit)
 
     def _apply_rev_limit(self) -> None:
         self._apply_curve()
@@ -787,14 +810,7 @@ class EngineModule(FeatureModule):
         vehicle.set_idle_rpm(self._cam_idle_stock_rpm)
 
     def _tick_cam(self, vehicle) -> None:
-        """Apply the reversible cam overlay at a modest write rate.
-
-        The validated car idle target is the primary low-RPM lope control. The
-        curve overlay remains a secondary, reversible shape for cars/ranges
-        where the curve is read. We deliberately do not write an arbitrary
-        audio-emitter address: the current build's ``CamshaftRPMScalar`` is
-        schema metadata, not a proven player-car scalar.
-        """
+        """Apply the reversible cam overlay at a modest write rate."""
         handoff_active = self._launch_handoff_active()
         if (
             not self._cam_enabled
@@ -1303,7 +1319,7 @@ class EngineModule(FeatureModule):
         # The status banner shows and hides itself in refresh().
         bind_progressive(lc_toggle, lc_min, lc_max)
 
-        launch_arm = ToggleRow("Enable enhanced launch control", False)
+        launch_arm = ToggleRow("Enable enhanced launch control", False, hint=HINT_LAUNCH_ARM)
         launch_arm.toggle.toggled_value.connect(self._on_launch_armed)
         self._widgets["launch_arm"] = launch_arm
         launch_card.add(launch_arm)
@@ -1313,7 +1329,9 @@ class EngineModule(FeatureModule):
             lambda binding: self.settings.set_binding("engine.launch", binding)
         )
         self._widgets["launch_bind"] = launch_bind
-        launch_card.add(FieldRow("Hold control", launch_bind))
+        launch_bind_row = FieldRow("Hold control", launch_bind)
+        launch_card.add(launch_bind_row)
+        bind_progressive(launch_arm, launch_bind_row)
 
         live_card = page.add_card("Live")
         stats = StatStrip()

@@ -166,19 +166,71 @@ class Stat(QWidget):
             self._unit.setText(unit)
 
 
+STAT_MIN_WIDTH = 104
+"""Narrowest a stat may be laid out before the strip wraps to another row.
+
+A stat holds a caption plus a value like a full car name, so squeezing eight of them
+into one row clipped the text. Wrapping keeps every value readable instead."""
+
+STAT_SPACING = 28
+
+
 class StatStrip(QWidget):
+    """A row of stats that wraps onto further rows when the card is too narrow."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._row = QHBoxLayout(self)
-        self._row.setContentsMargins(0, 0, 0, 0)
-        self._row.setSpacing(28)
+        self._grid = QVBoxLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(14)
         self._stats: dict[str, Stat] = {}
+        self._order: list[Stat] = []
+        self._columns = 0
+        # Without this the strip's minimum is the sum of every stat's minimum, so it
+        # refuses to narrow and the wrap never triggers - it just clips instead.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
     def add(self, key: str, caption: str, value: str = "--", unit: str = "") -> Stat:
         stat = Stat(caption, value, unit)
+        stat.setMinimumWidth(STAT_MIN_WIDTH)
         self._stats[key] = stat
-        self._row.addWidget(stat, 1)
+        self._order.append(stat)
+        self._relayout(self._columns or len(self._order))
         return stat
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        usable = max(1, self.width())
+        columns = max(1, (usable + STAT_SPACING) // (STAT_MIN_WIDTH + STAT_SPACING))
+        columns = min(columns, len(self._order)) or 1
+        if columns != self._columns:
+            self._relayout(columns)
+
+    def _relayout(self, columns: int) -> None:
+        """Rebuild the rows at `columns` per row, keeping the order stats were added in."""
+        columns = max(1, int(columns))
+        self._columns = columns
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            layout = item.layout()
+            if layout is not None:
+                while layout.count():
+                    child = layout.takeAt(0)
+                    if child.widget() is not None:
+                        child.widget().setParent(self)
+                layout.deleteLater()
+
+        for start in range(0, len(self._order), columns):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(STAT_SPACING)
+            chunk = self._order[start : start + columns]
+            for stat in chunk:
+                row.addWidget(stat, 1)
+            # Pad the last row so a lone stat does not stretch across the whole card.
+            for _ in range(columns - len(chunk)):
+                row.addStretch(1)
+            self._grid.addLayout(row)
 
     def set(self, key: str, value: str, colour: str | None = None, unit: str | None = None) -> None:
         stat = self._stats.get(key)

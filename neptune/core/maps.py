@@ -16,7 +16,14 @@ from copy import deepcopy
 from neptune.core import paths
 from neptune.core.models import utc_now
 
-TUNED_MODULES = ("engine", "turbo", "transmission")
+TUNED_MODULES = ("engine", "turbo", "transmission", "suspension")
+"""Modules a saved tune captures and re-applies, by module name.
+
+A module qualifies once its `save_state`/`load_state` round-trip covers everything the
+user set on its tab AND `load_state` re-applies those values to the live car, because a
+tune is applied while driving. Suspension carries ride height, air ride, bounce, camber,
+track width and toe.
+"""
 
 STORE_SCHEMA = 2
 

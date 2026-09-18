@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 GAME_EXE = "forzahorizon6.exe"
-GAME_BUILD = "430.771"
+GAME_BUILD = "440.853"
 
 RAD_TO_RPM = 9.549296
 
@@ -122,6 +122,15 @@ class Wheels:
     TRAVEL = 0x0018
     LOAD = 0x0050
 
+    FRICTION = 0x0000
+    """Live per-wheel slip/friction state the physics recomputes every frame: zero at
+    rest, and it swings with cornering load (front and rear swap with turn direction).
+    Read-only — it is an output, not a settable base."""
+
+    GRIP_LATERAL = 0x0374
+    GRIP_LONGITUDINAL = 0x0378
+    """Per-wheel grip SCALE, lateral (cornering) and longitudinal (straight-line)."""
+
     CAMBER_SIN = 0x0120
     CAMBER_COS = 0x0124
 
@@ -137,33 +146,7 @@ class Wheels:
 
 
 class CamberTable:
-    """Per-axle suspension-kinematics table baked when a tuning setup is applied.
-
-    `Wheels.CAMBER_SIN`/`CAMBER_COS` is a LIVE value the physics recomputes every
-    tick by interpolating through this table against wheel travel — writing it
-    directly gets overwritten almost immediately. This table is what the physics
-    interpolates FROM, so writing it once (like a tuning-menu change would) sticks.
-
-    Reached as wheel_base + PTR -> axle object + SUB -> the table itself. The front
-    axle's two wheels (FL/FR) share one table object; the rear axle's (RR/RL) share
-    another. Each table embeds TWO separate curves: the axle's left wheel reads
-    entries starting at HEADER (+0x20), the right wheel reads a second, independent
-    set of entries starting at SUB_B (+0xD40) — confirmed by decompiling the
-    interpolation call site (the mirror argument is hardcoded there, not per-wheel)
-    and by writing each region live and checking exactly one wheel moved, for both
-    axles. Each of the ENTRY_COUNT entries is a 112-byte kinematic pose;
-    CAMBER_SIN/CAMBER_COS within it is the same half-angle (sin, cos) pair as
-    Wheels.CAMBER_SIN/CAMBER_COS, in both regions.
-
-    TRACK_X/TRACK_X_B: two points per entry (wheel centre and, going by the offset
-    gap, likely the contact patch) that always carry the SAME lateral (X) value —
-    confirmed live, at every travel index sampled. That value flips sign between
-    a wheel and its mirrored partner while the other axes stay identical (FL
-    negative, FR positive), and it changes with travel (scrub), so this is track
-    width baked into the same curve camber lives in — a delta from wherever this
-    is now, not a target CAMBER_SIN/COS-style absolute (write-tested live: shifted
-    a car's front track outward, restored it, no crash, camber untouched).
-    """
+    """Per-axle suspension-kinematics table baked when a tuning setup is applied."""
 
     PTR = 0x408
     SUB = 0x30

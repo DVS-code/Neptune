@@ -19,7 +19,14 @@ from neptune.core.models import (
 )
 
 LOG_EXTENSION = ".nlog"
-MAP_COLUMNS = 10
+
+MAP_COLUMNS = 24
+"""Boost Map grid width, for projecting logged samples onto map cells.
+
+Must equal `neptune.ui.widgets.boostmap.COLUMNS` or a log's overlay lands on the wrong
+cells. Duplicated rather than imported so this module stays free of any UI import;
+`test_boost_map_grid_matches_log_projection` holds the two together.
+"""
 
 
 def map_context(log: NeptuneLog) -> tuple[float, int]:

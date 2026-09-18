@@ -1,20 +1,4 @@
-"""Camshaft behaviour model used by the Engine module.
-
-The game exposes ``CamshaftRPMScalar`` in its audio schema, but the current
-build does not expose a stable runtime pointer to an emitter instance.  This
-module therefore models the cam effect without touching an unknown address:
-the Engine module applies the returned frame to the proven live torque curve
-and the validated live car idle target.
-
-The cam is deliberately time-varying at low RPM.  A static torque-curve
-reshape can make a cam weaker or stronger, but it cannot make the uneven idle
-that a large-overlap cam produces.  ``torque_pulse`` is the reversible,
-low-speed lope signal that gives the live curve that missing behavior.
-
-The model is deliberately independent of Qt and process I/O so it can be
-checked offline and so a future direct-emitter backend can reuse the exact
-RPM/throttle behaviour.
-"""
+"""Camshaft behaviour model used by the Engine module."""
 
 from __future__ import annotations
 

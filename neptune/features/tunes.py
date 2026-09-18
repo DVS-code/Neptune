@@ -310,9 +310,10 @@ class TunesModule(FeatureModule):
 
         save_card = page.add_card(
             "Save current setup",
-            "Captures three tabs in full: torque, rev limit, launch and speed cap from "
+            "Captures four tabs in full: torque, rev limit, launch and speed cap from "
             "Engine, every boost setting from Turbo — including boost by gear and "
-            "the boost map — and the final drive and forward-gear ratios from Transmission.",
+            "the boost map — the final drive and forward-gear ratios from Transmission, "
+            "and ride height, air ride, camber, track width and toe from Suspension.",
         )
         save_row = QHBoxLayout()
         save_row.setSpacing(8)
@@ -415,6 +416,10 @@ class TunesModule(FeatureModule):
             if self._message:
                 banner.set(self._message, "ok" if self._message_ok else "error")
             elif listing.count() == 0:
-                banner.set("Set up the Engine, Turbo and Transmission tabs, then save that as a tune.", "info")
+                banner.set(
+                    "Set up the Engine, Turbo, Transmission and Suspension tabs, then "
+                    "save that as a tune.",
+                    "info",
+                )
             else:
                 banner.setVisible(False)

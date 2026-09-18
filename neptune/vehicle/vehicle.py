@@ -191,8 +191,15 @@ class Vehicle:
     def set_rev_ceiling(self, rpm: float) -> bool:
         return self._set_engine_rpm_field(O.EngineModel.MAX_CLAMP, rpm)
 
+    @property
+    def neg_clamp(self) -> float | None:
+        """The rpm where the torque curve cuts negative."""
+        return self._engine_rpm_field(O.EngineModel.NEG_CLAMP)
+
+    def set_neg_clamp(self, rpm: float) -> bool:
+        return self._set_engine_rpm_field(O.EngineModel.NEG_CLAMP, rpm)
+
     def set_curve_count(self, count: int) -> bool:
-        """Set the number of live torque-curve samples after validation."""
         count = int(count)
         if not (MIN_CURVE_POINTS <= count <= MAX_CURVE_POINTS):
             return False
@@ -580,17 +587,7 @@ class Vehicle:
         return self.process.i32(self.config + O.Config.NUM_GEARS)
 
     def boost_multiplier(self) -> float:
-        """How much the induction system multiplies engine torque, 1.0 when NA.
-
-        `max_scale` (`car+0x0ABC`) is the one boost lever measured to reach physics, and
-        power responds LINEARLY to it — 0.5x gave -50%, 3x gave +191%, on two cars with
-        telemetry power as the oracle. So it is the forced-induction term the peak figures
-        need: without it the estimate is the bare engine curve and reads far too low on any
-        boosted car.
-
-        Naturally aspirated cars must read exactly 1.0 rather than whatever happens to
-        sit in the field, or a car with no turbo would have its estimate scaled by noise.
-        """
+        """How much the induction system multiplies engine torque, 1.0 when NA."""
         block = self.turbo_block()
         scale = block.get("max_scale")
         if scale is None or scale != scale or scale <= 0.0:
@@ -600,37 +597,7 @@ class Vehicle:
         return scale
 
     def peaks(self, curve=None) -> tuple[tuple[float, int], tuple[float, int]]:
-        """((peak Nm, rpm), (peak hp, rpm)) from one pass over the curve.
-
-        Pass a curve that has already been read to avoid re-reading it. The interface
-        refreshes these several times a second alongside the graph, and reading the
-        array once for all three is the difference between one memory read per refresh
-        and three.
-
-        ★ MEASURED against the game's own telemetry, not derived:
-
-            torque_nm = curve[index] * max_scale * rpm_per_index
-
-        The curve is **already in a physical unit** — its values run ~2.8-3.7 on a real
-        car, not 0-1 — so normalising it by its own maximum (which the old code did) threw
-        away the magnitude entirely and left `torque_scale` standing in for it. That is why
-        a boosted car read ~3.8x too low.
-
-        `torque_scale` (`config-0x0C`) is NOT part of this product. It reads 236.2 on
-        the validation car where the true multiplier is 176.1; using it is what produced
-        the wrong answer. It stays only in `fingerprint()`, where it identifies a car
-        rather than scaling anything.
-
-        Validation, 784 full-throttle telemetry samples on a turbo car:
-        | rpm  | predicted | measured | ratio  |
-        |------|-----------|----------|--------|
-        | 6500 |     643.7 |    643.7 | 1.0000 |
-        | 7000 |     638.1 |    637.6 | 1.0008 |
-        | 8000 |     607.6 |    607.0 | 1.0009 |
-        Median across the whole range 0.9965. The low bands read a little under because
-        those samples were taken while still accelerating and the turbo had not fully
-        spooled — the steady-state bands are exact.
-        """
+        """((peak Nm, rpm), (peak hp, rpm)) from one pass over the curve."""
         if curve is None:
             curve = self.curve()
         if len(curve) < 2:

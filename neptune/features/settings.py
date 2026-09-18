@@ -285,13 +285,19 @@ class SettingsModule(FeatureModule):
         QDesktopServices.openUrl(QUrl(ISSUES_URL))
 
     def _open_data_folder(self) -> None:
-        import os
-        import subprocess
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
 
+        # Qt picks the right file manager per platform, so this also works where the
+        # tool runs under Wine/Proton. `os.startfile` exists only on Windows.
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(paths.data_dir())):
+            return
+
+        import subprocess
+        import sys
+
+        opener = {"win32": "explorer", "darwin": "open"}.get(sys.platform, "xdg-open")
         try:
-            os.startfile(paths.data_dir())
+            subprocess.Popen([opener, paths.data_dir()])
         except Exception:
-            try:
-                subprocess.Popen(["explorer", paths.data_dir()])
-            except Exception:
-                pass
+            pass

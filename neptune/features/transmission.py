@@ -352,7 +352,13 @@ class TransmissionModule(FeatureModule):
         stats.set("redline", f"{redline:.0f}", unit="rpm")
         stats.set("powerband", f"{redline * 0.55:.0f}–{redline * 0.95:.0f}", unit="rpm")
         if self._ready_tune() is None:
-            status.set("Transmission data is unavailable for this car.", "warn")
+            # Say WHY, and what to do about it. The usual cause is simply that the car is
+            # still loading, where the ratio array reads as zeros for a moment.
+            status.set(
+                "Could not read this car's gearing yet. Drive out into the world, then "
+                "reload the car if it does not appear.",
+                "warn",
+            )
         elif not self._enabled:
             status.set("Transmission controls are disabled. Enable them to apply gearing changes.", "info")
         elif self._declared_gear_count and self._declared_gear_count > count:

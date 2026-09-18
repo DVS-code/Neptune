@@ -23,8 +23,15 @@ from PySide6.QtWidgets import QWidget
 
 from neptune.ui import theme as T
 
-COLUMNS = 10
-MAX_ROWS = 6
+COLUMNS = 24
+MAX_ROWS = 12
+LEGACY_COLUMNS = 10
+"""The 1.1.5 grid width. Saved maps from before Boost Map 2.0 are this wide and are
+resampled onto the current grid on load — see `resample`."""
+
+THROTTLE_ROWS = 8
+"""Rows used by the RPM x throttle table. One row per 12.5% of throttle."""
+
 MIN_MULT = 0.0
 MAX_MULT = 4.0
 DEFAULT_MULT = 1.0
@@ -32,6 +39,8 @@ NUDGE = 0.05
 
 LABEL_LEFT = 52
 LABEL_BOTTOM = 22
+LABEL_MIN_WIDTH = 34
+"""Width one "7.6k" RPM label needs. Labels are thinned to this spacing."""
 CELL_MIN_HEIGHT = 26
 MIN_HEIGHT = 120
 
@@ -403,7 +412,12 @@ class BoostMap(QWidget):
             live_cell = (row, column)
 
         small = QFont("Segoe UI", 8)
-        cell_font = QFont("Segoe UI", 9)
+        # A 24-wide table in the narrow Turbo card leaves ~25 px per cell, where "1.00" at
+        # 9pt overflows into its neighbours. Shrink the text, and drop the leading digit
+        # below the width where even that fits, rather than painting an unreadable smear.
+        cell_width = self._grid().width() / COLUMNS
+        cell_font = QFont("Segoe UI", 9 if cell_width >= 44 else 8 if cell_width >= 34 else 7)
+        terse = cell_width < 27
 
         for row in range(self._rows):
             for column in range(COLUMNS):
@@ -429,7 +443,12 @@ class BoostMap(QWidget):
 
                 painter.setFont(cell_font)
                 painter.setPen(QColor(240, 242, 246))
-                painter.drawText(rect, Qt.AlignCenter, f"{value:.2f}")
+                text = f"{value:.2f}"
+                if terse:
+                    # "1.00" -> ".00", "0.95" -> ".95": the leading digit is 0 or 1 across
+                    # almost the whole range, so the decimals carry the information.
+                    text = text[1:] if value < 10.0 else f"{value:.1f}"
+                painter.drawText(rect, Qt.AlignCenter, text)
 
         if live_cell is not None and live_cell[0] < self._rows and live_cell[1] < COLUMNS:
             painter.setPen(QPen(QColor(T.ACCENT_BRIGHT), 2))
@@ -473,18 +492,31 @@ class BoostMap(QWidget):
 
         painter.setFont(small)
         painter.setPen(QColor(T.TEXT_FAINT))
+        # At 24 columns every label will not fit, so draw every Nth one. The step is chosen
+        # from the real cell width rather than a constant, so the axis stays readable whether
+        # the table is in the narrow Turbo card or the wide Boost Map window.
+        cell_width = grid.width() / COLUMNS
+        step = max(1, math.ceil(LABEL_MIN_WIDTH / cell_width)) if cell_width > 0 else 1
         for column in range(COLUMNS):
+            if column % step:
+                continue
             rect = self._cell_rect(0, column)
             rpm = self._max_rpm * (column + 0.5) / COLUMNS
             painter.drawText(
-                QRectF(rect.left(), grid.bottom() + 2, rect.width(), LABEL_BOTTOM),
+                QRectF(rect.left(), grid.bottom() + 2, rect.width() * step, LABEL_BOTTOM),
                 Qt.AlignCenter,
                 f"{rpm / 1000:.1f}k",
             )
         if self._rows > 1:
+            # Row 0 is the highest throttle band (load runs 1 - throttle downward), so label
+            # each row with the TOP of the band it covers, matching how `multiplier_at` bins.
+            row_height = grid.height() / self._rows
+            row_step = max(1, math.ceil(14 / row_height)) if row_height > 0 else 1
             for row in range(self._rows):
+                if row % row_step:
+                    continue
                 rect = self._cell_rect(row, 0)
-                share = 100 - int(100 * row / self._rows)
+                share = int(round(100 * (self._rows - row) / self._rows))
                 painter.drawText(
                     QRectF(0, rect.top(), LABEL_LEFT - 6, rect.height()),
                     Qt.AlignRight | Qt.AlignVCenter,
@@ -506,26 +538,85 @@ class BoostMap(QWidget):
             )
 
 
+def resample(flat, rows: int, source_columns: int, columns: int = COLUMNS) -> list[float]:
+    """Re-grid a flat map from `source_columns` wide to `columns` wide, preserving its shape.
+
+    A saved map is a flat row-major list, so its width is part of the format. Reading a
+    10-wide map straight into a 24-wide table would drag each value to a different RPM and
+    silently change a tune the user built. Resampling keeps every cell at the same fraction
+    of the RPM axis instead, interpolating between neighbours.
+
+    Rows are left alone: the row axis is throttle, which is already a fraction, and a
+    row-count change goes through `BoostMap.set_rows`.
+    """
+    rows = max(1, int(rows))
+    source_columns = max(1, int(source_columns))
+    columns = max(1, int(columns))
+    values = list(flat or [])
+    if source_columns == columns and len(values) == rows * columns:
+        return [_clamp_mult(value) for value in values]
+
+    out: list[float] = []
+    for row in range(rows):
+        line = values[row * source_columns : (row + 1) * source_columns]
+        if not line:
+            out.extend([DEFAULT_MULT] * columns)
+            continue
+        for column in range(columns):
+            # Sample both grids at cell centres so the ends stay put and the curve does
+            # not drift half a cell toward zero.
+            position = (column + 0.5) / columns * source_columns - 0.5
+            if position <= 0:
+                out.append(_clamp_mult(line[0]))
+            elif position >= len(line) - 1:
+                out.append(_clamp_mult(line[-1]))
+            else:
+                low = int(position)
+                weight = position - low
+                out.append(_clamp_mult(line[low] * (1.0 - weight) + line[low + 1] * weight))
+    return out
+
+
+def _clamp_mult(value) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MULT
+    if number != number:
+        return DEFAULT_MULT
+    return max(MIN_MULT, min(MAX_MULT, number))
+
+
 def multiplier_at(flat, rows: int, rpm: float, max_rpm: float, load: float | None = None) -> float:
     """Look the table up at an RPM (and load), interpolating along the RPM axis.
 
     Module-level so the feature can evaluate the table without touching the widget.
+
+    The row width is taken from the data rather than from `COLUMNS`, so a map saved at a
+    different grid width still evaluates correctly. Reading a narrower map against the
+    current constant used to fall through to 1.00x at every RPM — a boost map that
+    silently did nothing.
     """
     if not flat or not max_rpm or max_rpm <= 0:
         return DEFAULT_MULT
     rows = max(1, rows)
+    columns = len(flat) // rows
+    if columns < 1:
+        return DEFAULT_MULT
     row = 0
     if rows > 1 and load is not None:
         row = int(max(0.0, min(0.999, load)) * rows)
-    base = row * COLUMNS
-    line = flat[base : base + COLUMNS]
-    if len(line) < COLUMNS:
+    base = row * columns
+    line = flat[base : base + columns]
+    if len(line) < columns:
         return DEFAULT_MULT
+    if columns == 1:
+        return line[0]
 
-    position = max(0.0, min(1.0, rpm / max_rpm)) * COLUMNS - 0.5
+    position = max(0.0, min(1.0, rpm / max_rpm)) * columns - 0.5
     if position <= 0:
         return line[0]
-    if position >= COLUMNS - 1:
+    if position >= columns - 1:
         return line[-1]
     low = int(position)
     weight = position - low

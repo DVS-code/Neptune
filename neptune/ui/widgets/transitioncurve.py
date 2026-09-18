@@ -8,7 +8,38 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from neptune.ui import theme as T
 
-DEFAULT_CURVE = (0.0, 0.10, 0.50, 0.90, 1.0)
+POINTS = 11
+"""Handles on the curve, including the two fixed ends — so POINTS - 2 are draggable."""
+
+MIN_POINTS = 3
+"""Below this there is nothing to drag between the fixed ends."""
+
+
+LEGACY_DEFAULT = (0.0, 0.10, 0.50, 0.90, 1.0)
+"""The ease-in/ease-out default from when the curve had five handles.
+
+Kept as the shape of the default rather than the values, so that adding handles does not
+change how air ride already feels: a smooth start and finish with the movement in the
+middle. A straight line would have made every existing car's animation abruptly linear.
+"""
+
+
+def _default_curve(points: int = POINTS) -> tuple[float, ...]:
+    """`LEGACY_DEFAULT` resampled onto `points` handles, preserving its shape."""
+    points = max(MIN_POINTS, int(points))
+    span = len(LEGACY_DEFAULT) - 1
+    curve = []
+    for index in range(points):
+        position = index / (points - 1) * span
+        low = min(span - 1, int(position))
+        weight = position - low
+        curve.append(LEGACY_DEFAULT[low] * (1.0 - weight) + LEGACY_DEFAULT[low + 1] * weight)
+    curve[0] = 0.0
+    curve[-1] = 1.0
+    return tuple(curve)
+
+
+DEFAULT_CURVE = _default_curve()
 GRAPH_HEIGHT = 172
 MARGIN_LEFT = 54
 MARGIN_RIGHT = 14
@@ -17,16 +48,31 @@ MARGIN_BOTTOM = 26
 HANDLE_RADIUS = 5.0
 HIT_RADIUS = 12.0
 
-
 def normalise_curve(values) -> list[float]:
-    """Return a safe five-point curve with fixed start and finish."""
+    """Return a safe curve with fixed start and finish.
+
+    Any length of at least `MIN_POINTS` is accepted and resampled onto the current
+    handle count, so a curve saved at a different resolution keeps its shape instead of
+    being thrown away and reset to the default.
+    """
     try:
         curve = [float(value) for value in values]
     except (TypeError, ValueError):
         curve = []
-    if len(curve) != len(DEFAULT_CURVE) or any(value != value for value in curve):
+    if len(curve) < MIN_POINTS or any(value != value for value in curve):
         curve = list(DEFAULT_CURVE)
     curve = [max(0.0, min(1.0, value)) for value in curve]
+
+    if len(curve) != POINTS:
+        source = curve
+        span = len(source) - 1
+        curve = []
+        for index in range(POINTS):
+            position = index / (POINTS - 1) * span
+            low = min(span - 1, int(position))
+            weight = position - low
+            curve.append(source[low] * (1.0 - weight) + source[low + 1] * weight)
+
     curve[0] = 0.0
     curve[-1] = 1.0
     return curve
@@ -43,7 +89,7 @@ def curve_value(values, progress: float) -> float:
 
 
 class TransitionCurve(QWidget):
-    """Five fixed-time handles; drag the middle handles to shape transition progress."""
+    """Fixed-time handles; drag the middle handles to shape transition progress."""
 
     changed = Signal(list)
 

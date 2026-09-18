@@ -6,9 +6,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from neptune.ui import theme as T
-from neptune.ui.widgets.boostmap import COLUMNS, BoostMap
+from neptune.ui.widgets.boostmap import COLUMNS, THROTTLE_ROWS, BoostMap
 from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import StatStrip
+from neptune.ui.widgets.controls import Segmented
+
+AXIS_RPM = "RPM only"
+AXIS_THROTTLE = "RPM x throttle"
 
 
 class BoostMapWorkspace(QWidget):
@@ -51,6 +55,16 @@ class BoostMapWorkspace(QWidget):
             root.addWidget(self.map, 1)
             return
 
+        axis_row = QHBoxLayout()
+        axis_label = QLabel("Table")
+        axis_label.setStyleSheet(f"color: {T.TEXT_MUTED};")
+        axis_row.addWidget(axis_label)
+        self._axis = Segmented([AXIS_RPM, AXIS_THROTTLE], AXIS_THROTTLE if rows > 1 else AXIS_RPM)
+        self._axis.changed.connect(self._set_axis)
+        axis_row.addWidget(self._axis)
+        axis_row.addStretch(1)
+        root.addLayout(axis_row)
+
         stats = StatStrip()
         for key, label in (
             ("rpm", "RPM"),
@@ -91,6 +105,37 @@ class BoostMapWorkspace(QWidget):
         lower.addWidget(compare)
         lower.addStretch(1)
         root.addLayout(lower)
+
+    def _set_axis(self, label: str) -> None:
+        """Switch between the single RPM row and the full RPM x throttle grid."""
+        rows = THROTTLE_ROWS if label == AXIS_THROTTLE else 1
+        if rows == self.map.rows():
+            return
+        # set_rows copies the existing row down the new ones, so going 1 -> 8 keeps the
+        # RPM curve the user already shaped instead of resetting it to flat.
+        self.map.set_rows(rows)
+        self._stock = [1.0] * (COLUMNS * rows)
+        if self._compare:
+            self.map.set_comparison(self._stock)
+        self.changed.emit()
+
+    def set_table(self, values, rows: int, max_rpm: float | None = None) -> None:
+        """Adopt a table loaded elsewhere (a preset or a saved tune) without emitting.
+
+        Silent by design: this is the owner pushing state in, so echoing `changed` back
+        would have the owner write its own value over itself.
+        """
+        rows = max(1, int(rows))
+        self.map.set_rows(rows)
+        self.map.set_flat(values, rows)
+        if max_rpm:
+            self.map.set_max_rpm(max_rpm)
+        self._stock = [1.0] * (COLUMNS * rows)
+        if self._compare:
+            self.map.set_comparison(self._stock)
+        axis = getattr(self, "_axis", None)
+        if axis is not None:
+            axis.set_value(AXIS_THROTTLE if rows > 1 else AXIS_RPM)
 
     def _toggle_stock(self) -> None:
         self._compare = not self._compare

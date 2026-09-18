@@ -112,16 +112,33 @@ class TransmissionTune:
 
     @classmethod
     def from_vehicle(cls, vehicle) -> TransmissionTune:
+        """Read this car's gearing, stopping at the first slot that is not a real gear.
+
+        The game's ratio array is a fixed 8 slots whatever the car has, so a 6-speed leaves
+        two slots of whatever was there before. Accepting anything above 0.05 let that
+        trailing junk through as "gear 7", and a junk value outside 0.05-10.0 then failed
+        `validate()`, which made the whole page report "Transmission data is unavailable for
+        this car" for an ordinary car that reads perfectly well.
+
+        Forward ratios also descend (4.23, 2.52, 1.66 ...), so a value that climbs is the end
+        of the real gears rather than another one.
+        """
         try:
             raw_ratios = list(vehicle.gears() or [])
         except Exception:
             raw_ratios = []
-        ratios = []
+        ratios: list[float] = []
         for raw in raw_ratios:
             value = finite_float(raw)
-            if value is not None and value > 0.05:
-                ratios.append(value)
+            if value is None or not 0.05 <= value <= 10.0:
+                break
+            if ratios and value >= ratios[-1]:
+                break
+            ratios.append(value)
+
         count = finite_int(getattr(vehicle, "gear_count", None))
+        # `gear_count` counts reverse and/or neutral too, so it can exceed the forward
+        # ratios that were actually read. Only ever let it shorten the list.
         if count is None or count <= 0 or count > len(ratios):
             count = len(ratios) or None
         if count is not None:

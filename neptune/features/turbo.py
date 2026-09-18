@@ -12,7 +12,9 @@ from neptune.core.module import FeatureModule
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.boostmap import COLUMNS as MAP_COLUMNS
-from neptune.ui.widgets.boostmap import BoostMap, multiplier_at
+from neptune.ui.widgets.boostmap import MAX_ROWS as MAP_MAX_ROWS
+from neptune.ui.widgets.boostmap import multiplier_at
+from neptune.ui.widgets.boostmap import resample as map_resample
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow, bind_progressive
 from neptune.ui.widgets.controls import BindButton
 from neptune.ui.widgets.sliderrow import SliderRow
@@ -160,9 +162,14 @@ class TurboModule(FeatureModule):
             self._gear_count = count
             self._controls_dirty = True
 
-    def _capture_stock(self, vehicle) -> None:
+    def _capture_stock(self, vehicle, force: bool = False) -> None:
+        """Snapshot this car's stock turbo block.
 
-        if vehicle is None or self._is_tuned():
+        Normally skipped while a tune is held, so a re-attach cannot record already-boosted
+        values as "stock". A car CHANGE must pass `force`: the multipliers carry over, so
+        the baseline they scale has to be the new car's, not the previous car's.
+        """
+        if vehicle is None or (self._is_tuned() and not force):
             return
         values = vehicle.turbo_block()
         ceiling = values.get("max_boost")
@@ -173,18 +180,16 @@ class TurboModule(FeatureModule):
         self._applied_signature = None
 
     def on_car_changed(self, vehicle) -> None:
+        # The multipliers and the boost map are RELATIVE, so they carry across cars and
+        # re-apply to the new car's own stock boost. `min_boost` is a gauge percentage and
+        # the per-gear factors are relative too, so those carry as well.
         self._blower_peak = -999.0
-        self._multipliers = {key: 1.0 for key in self._multipliers}
-        self._min_boost_percent = 0.0
-        self._by_gear = False
-        self._gear_multipliers = {gear: 1.0 for gear in range(1, MAX_GEARS + 1)}
-        self._map_points = [1.0] * MAP_COLUMNS
-        self._map_enabled = False
         self._applied_signature = None
         self._stock_valid = False
         self._controls_dirty = True
         self.vehicle = vehicle
-        self._capture_stock(vehicle)
+        # Forced: the held multipliers must scale THIS car's stock block, not the last one's.
+        self._capture_stock(vehicle, force=True)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -518,17 +523,20 @@ class TurboModule(FeatureModule):
         self._applied_signature = None
 
     def _set_map_enabled(self, enabled: bool) -> None:
+        """Turning the map on reveals only the button that opens the editor.
+
+        The inline table, its tool buttons and the axis selector all live in the Boost Map
+        window now: a 24-column grid does not fit the Turbo card, and having two editors for
+        one table meant every edit had to be mirrored between them.
+        """
         self._map_enabled = bool(enabled)
         self._applied_signature = None
-        for key in ("map", "map_tools", "map_axis_row"):
-            widget = self._widgets.get(key)
-            if widget is not None:
-                widget.setVisible(bool(enabled))
         open_button = self._widgets.get("open_map")
         if open_button is not None:
             open_button.setVisible(bool(enabled))
 
         if not enabled:
+            self._close_map_workspace()
             self._restore_scale()
 
     def _open_map_workspace(self) -> None:
@@ -550,24 +558,30 @@ class TurboModule(FeatureModule):
             layout.addWidget(self._map_workspace)
             self._map_dialog.finished.connect(self._on_map_dialog_closed)
         else:
-            self._map_workspace.map.set_flat(self._map_points, self._map_rows)
+            self._map_workspace.set_table(self._map_points, self._map_rows, self._map_max_rpm)
         self._map_dialog.show()
         self._map_dialog.raise_()
         self._map_dialog.activateWindow()
+
+    def _close_map_workspace(self) -> None:
+        """Close the editor window, so turning the map off does not leave it orphaned."""
+        dialog, self._map_dialog = self._map_dialog, None
+        self._map_workspace = None
+        if dialog is not None:
+            dialog.close()
+            dialog.deleteLater()
 
     def _on_map_dialog_closed(self, _result: int) -> None:
         self._map_dialog = None
         self._map_workspace = None
 
     def _on_workspace_map_changed(self) -> None:
+        """The Boost Map window is the only editor, so it is the only source of the table."""
         if self._map_workspace is None:
             return
         self._map_points = self._map_workspace.values()
         self._map_rows = self._map_workspace.map.rows()
         self._applied_signature = None
-        widget = self._widgets.get("map")
-        if widget is not None:
-            widget.set_flat(self._map_points, self._map_rows)
 
     def _restore_scale(self) -> None:
         vehicle = self.vehicle
@@ -576,34 +590,6 @@ class TurboModule(FeatureModule):
         base = self.stock.get("max_scale")
         if base is not None:
             vehicle.turbo_set("max_scale", base * self._multipliers["max_scale"])
-
-    def _set_map_axis(self, label: str) -> None:
-        """Switch the table between a 1D RPM row and a 2D RPM x throttle grid."""
-        rows = 4 if label.startswith("RPM x") else 1
-        widget = self._widgets.get("map")
-        if widget is not None:
-            widget.set_rows(rows)
-            self._map_points = widget.flat()
-        self._map_rows = rows
-        self._applied_signature = None
-
-    def _on_map_changed(self) -> None:
-        widget = self._widgets.get("map")
-        if widget is not None:
-            self._map_points = widget.flat()
-            self._map_rows = widget.rows()
-        if self._map_workspace is not None:
-            # Keep the open Boost Map window current, or its next edit writes back a stale map.
-            self._map_workspace.map.set_flat(self._map_points, self._map_rows)
-        self._applied_signature = None
-
-    def _flatten_map(self) -> None:
-        self._map_points = [1.0] * (MAP_COLUMNS * self._map_rows)
-        widget = self._widgets.get("map")
-        if widget is not None:
-            widget.flatten()
-        self._applied_signature = None
-        self._restore_scale()
 
     def _set_lag_enabled(self, enabled: bool) -> None:
         self._lag_enabled = bool(enabled)
@@ -649,26 +635,16 @@ class TurboModule(FeatureModule):
             lag_rate.set_value(self._lag_rate)
             lag_rate.set_enabled(self._lag_enabled)
 
-        map_widget = self._widgets.get("map")
-        if map_widget is not None:
-            map_widget.set_flat(self._map_points, self._map_rows)
-            map_widget.set_max_rpm(self._map_max_rpm)
-            map_widget.setVisible(self._map_enabled)
         map_toggle = self._widgets.get("map_toggle")
         if map_toggle is not None:
             map_toggle.set_value(self._map_enabled)
-        tools = self._widgets.get("map_tools")
-        if tools is not None:
-            tools.setVisible(self._map_enabled)
         open_button = self._widgets.get("open_map")
         if open_button is not None:
             open_button.setVisible(self._map_enabled)
-        axis_row = self._widgets.get("map_axis_row")
-        if axis_row is not None:
-            axis_row.setVisible(self._map_enabled)
-        axis = self._widgets.get("map_axis")
-        if axis is not None:
-            axis.set_value("RPM x throttle" if self._map_rows > 1 else "RPM only")
+        # An open Boost Map window must follow a table loaded from a preset or a tune,
+        # or the next edit in it writes back the map the user just replaced.
+        if self._map_workspace is not None:
+            self._map_workspace.set_table(self._map_points, self._map_rows, self._map_max_rpm)
 
         by_gear = self._widgets.get("by_gear")
         if by_gear is not None:
@@ -730,50 +706,7 @@ class TurboModule(FeatureModule):
         self._widgets["map_toggle"] = map_toggle
         map_card.add(map_toggle)
 
-        from neptune.ui.widgets.card import FieldRow as _FieldRow
-        from neptune.ui.widgets.controls import Segmented as _Segmented
-
-        axis = _Segmented(["RPM only", "RPM x throttle"], "RPM only")
-        axis.changed.connect(self._set_map_axis)
-        self._widgets["map_axis"] = axis
-        self._widgets["map_axis_row"] = _FieldRow("Table", axis)
-        self._widgets["map_axis_row"].setVisible(False)
-        map_card.add(self._widgets["map_axis_row"])
-
-        boost_map = BoostMap()
-        boost_map.changed.connect(self._on_map_changed)
-        boost_map.setVisible(False)
-        self._widgets["map"] = boost_map
-        map_card.add(boost_map)
-
-        from PySide6.QtWidgets import QHBoxLayout as _HBox
-        from PySide6.QtWidgets import QWidget as _Widget
-
         from neptune.ui.widgets.buttons import Button as _Button
-
-        tools = _Widget()
-        row = _HBox(tools)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        operations = (
-            ("-5%", lambda: boost_map.scale_selection(0.95), "Take 5% off the selection"),
-            ("+5%", lambda: boost_map.scale_selection(1.05), "Add 5% to the selection"),
-            (
-                "Interpolate",
-                boost_map.interpolate_selection,
-                "Straight-line fill between the ends of the selection",
-            ),
-            ("Smooth", boost_map.smooth_selection, "Average out spikes in the selection"),
-            ("Flatten", self._flatten_map, "Put the whole table back to 1.00x"),
-        )
-        for label, handler, tip in operations:
-            button = _Button(label)
-            button.setToolTip(tip)
-            button.clicked.connect(handler)
-            row.addWidget(button)
-        tools.setVisible(False)
-        self._widgets["map_tools"] = tools
-        map_card.add(tools)
 
         open_map = _Button("Open Boost Map")
         open_map.clicked.connect(self._open_map_workspace)
@@ -930,13 +863,6 @@ class TurboModule(FeatureModule):
             else:
                 stats.set("scramble", "Ready", unit="")
 
-        map_widget = self._widgets.get("map")
-        if map_widget is not None and self._map_enabled:
-            load = None
-            if self._map_rows > 1:
-                throttle = vehicle.throttle
-                load = None if throttle is None else 1.0 - throttle
-            map_widget.set_live(vehicle.rpm, load)
         if self._map_workspace is not None:
             multiplier = self._map_factor(vehicle)
             self._map_workspace.set_live(
@@ -1015,21 +941,16 @@ class TurboModule(FeatureModule):
 
         self._map_enabled = bool(data.get("map_enabled", False))
         try:
-            self._map_rows = max(1, min(6, int(data.get("map_rows", 1))))
+            self._map_rows = max(1, min(MAP_MAX_ROWS, int(data.get("map_rows", 1))))
         except (TypeError, ValueError):
             self._map_rows = 1
         stored = data.get("map_points")
         if isinstance(stored, (list, tuple)) and stored:
-            points = []
-            for index in range(MAP_COLUMNS * self._map_rows):
-                try:
-                    value = float(stored[index]) if index < len(stored) else 1.0
-                except (TypeError, ValueError):
-                    value = 1.0
-                if value != value:
-                    value = 1.0
-                points.append(max(0.0, min(4.0, value)))
-            self._map_points = points
+            # A saved map's width is implied by its length, and Boost Map 2.0 widened the
+            # grid. Resample from whatever width it was written at so a tune built before
+            # the change keeps the same boost at the same RPM.
+            width = max(1, len(stored) // max(1, self._map_rows))
+            self._map_points = map_resample(stored, self._map_rows, width, MAP_COLUMNS)
         else:
             self._map_points = [1.0] * MAP_COLUMNS
 
