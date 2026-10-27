@@ -52,34 +52,6 @@ class Vehicle:
         self.engine = car + O.Car.ENGINE_MODEL
         self.config = entity + O.Config.ENTITY_TO_CONFIG
 
-    def fingerprint(self) -> tuple | None:
-        """Identity key for this car.
-
-        This is the legacy tune-storage key. It keeps the original shape so
-        existing per-car tune records remain addressable. Runtime car-change
-        detection uses ``identity_fingerprint`` below because the live idle
-        field is now intentionally writable by the cam controller.
-        """
-        try:
-            count = self.curve_count
-            if not count or not (MIN_CURVE_POINTS <= count <= MAX_CURVE_POINTS):
-                return None
-            idle = self.idle_rpm
-            scale = self.rpm_per_index
-            aspiration = self.aspiration
-            torque = self.torque_scale
-            if idle is None or scale is None:
-                return None
-            return (
-                int(count),
-                int(round(idle)),
-                int(round(scale)),
-                int(aspiration) if aspiration is not None else -1,
-                int(round(torque)) if torque is not None else -1,
-            )
-        except Exception:
-            return None
-
     def identity_fingerprint(self) -> tuple | None:
         """Return the runtime identity without mutable live-control fields.
 

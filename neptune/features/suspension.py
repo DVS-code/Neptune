@@ -207,7 +207,7 @@ class SuspensionModule(FeatureModule):
         self._sequence = "together"
         # Keep the existing behaviour for older presets while allowing the
         # user to disarm the air-ride action without losing its settings.
-        self._airride_enabled = True
+        self._airride_enabled = bool(settings.get("suspension_airride_enabled"))
         self._enabled = bool(settings.get("suspension_enabled"))
         self._lowered = False
 
@@ -1225,6 +1225,7 @@ class SuspensionModule(FeatureModule):
             return
 
         self._airride_enabled = enabled
+        self.settings.remember("suspension_airride_enabled", enabled)
         self._edge.reset()
 
         if not enabled and self._lowered and not self._bounce and not self._hydraulics:
