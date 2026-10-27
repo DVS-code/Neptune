@@ -12,6 +12,7 @@
   "266": "1970 Porsche 914/6",
   "268": "1989 Porsche 944 Turbo",
   "269": "1987 Porsche 959",
+  "278": "2006 Vauxhall Astra VXR",
   "281": "1968 Plymouth Barracuda Formula-S",
   "289": "1969 Chevrolet Camaro Super Sport Coupe",
   "291": "1990 Vauxhall Lotus Carlton",
@@ -996,6 +997,7 @@
   "3415": "1966 Jaguar XJ13",
   "3419": "2020 Toyota Tundra TRD Pro",
   "3428": "2019 Ginetta G10 RM",
+  "3429": "2019 Ginneta G40 Junior",
   "3432": "1977 Quadra VTech",
   "3434": "2020 BMW M2 Competition Coupe",
   "3437": "2020 McLaren GT",
@@ -1240,6 +1242,7 @@
   "3953": "2023 Porsche 911 Turbo S",
   "3954": "2024 Chevrolet Camaro ZL1",
   "3955": "2024 Ram 1500 TRX",
+  "3958": "2023 Dodge Challenger SRT Demon 170",
   "3959": "2022 Dodge Challenger SRT Super Stock",
   "3960": "1994 Subaru Vivio RX-R",
   "3964": "2024 Toyota Prius Prime XSE Premium",
@@ -1251,6 +1254,7 @@
   "4038": "1999 Toyota Altezza RS200 Z EDITION",
   "4055": "1996 Toyota Starlet Glanza V",
   "4057": "1997 Nissan Skyline GT-R V-Spec",
+  "4067": "2025 Bentley Continental GT Speed",
   "4069": "1988 BMW M3",
   "4081": "2024 Koenigsegg Gemera",
   "4084": "1972 Datsun #269 Attacking the Clock Racing 240Z 'All Carbon Hill Climb Beast'",
@@ -1324,5 +1328,6 @@
   "4333": "2017 Toyota JPN Taxi",
   "4341": "2017 Ferrari J50 Preorder Car",
   "4342": "1966 Toyota Sports 800 Fanta Edition",
+  "4354": "1990 Jaguar XJ-S Forza Edition",
   "9007": "1994 Ford Supervan 3 'Donut Media Edition'"
 }

@@ -58,13 +58,13 @@ class TunesModule(FeatureModule):
 
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
-        self._key = store.car_key(vehicle.fingerprint()) if vehicle else None
+        self._key = store.car_key(vehicle.identity_fingerprint()) if vehicle else None
         self._adopt_name(vehicle)
         self._dirty = True
 
     def on_car_changed(self, vehicle) -> None:
         self.vehicle = vehicle
-        self._key = store.car_key(vehicle.fingerprint()) if vehicle else None
+        self._key = store.car_key(vehicle.identity_fingerprint()) if vehicle else None
         self._adopt_name(vehicle)
         self._dirty = True
 

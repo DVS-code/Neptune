@@ -29,6 +29,7 @@ DEFAULTS = {
     "tuning_assistant": False,
     # Page master switches, remembered between sessions.
     "suspension_enabled": False,
+    "suspension_airride_enabled": True,
     "dyno_enabled": False,
     "transmission_enabled": False,
     "bindings": {},
