@@ -74,10 +74,11 @@ class Vehicle:
             scale = self.rpm_per_index
             aspiration = self.aspiration
             torque = self.torque_scale
-            if scale is None or not self.car_config:
+            name = self.media_name
+            if scale is None or not name:
                 return None
             return (
-                self.media_name or "",
+                name,
                 int(round(scale)),
                 int(aspiration) if aspiration is not None else -1,
                 int(round(torque)) if torque is not None else -1,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
+from neptune.core import carnames
 from neptune.core.module import ModuleRegistry
 from neptune.memory import offsets as O
 from neptune.memory.process import Process, ProcessError
@@ -65,6 +66,7 @@ class Runtime:
         except ProcessError as error:
             self._set_status(STATE_DETACHED, str(error))
             return False, str(error)
+        carnames.load_game_names(self.process.executable_path)
         self._set_status(STATE_WAITING, "Attached. Waiting for a car.")
         self._acquire()
         self.start()

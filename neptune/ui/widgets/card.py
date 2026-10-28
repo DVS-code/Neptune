@@ -14,6 +14,7 @@ from qfluentwidgets import (
 
 from neptune.ui import theme as T
 from neptune.ui.widgets.helpmark import HelpMark
+from neptune.ui.widgets.marquee import MarqueeLabel
 from neptune.ui.widgets.toggle import Toggle
 
 
@@ -148,8 +149,10 @@ class Stat(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(5)
 
-        self._value = QLabel(value)
+        self._value = MarqueeLabel(value)
         self._value.setObjectName("StatValue")
+        # Allowed below its text width: a long value (a car name) scrolls instead of clipping.
+        self._value.setMinimumWidth(1)
         row.addWidget(self._value)
 
         self._unit = QLabel(unit)

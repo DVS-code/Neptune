@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QListWidgetItem
+from PySide6.QtWidgets import QHBoxLayout, QListWidgetItem
 from qfluentwidgets import LineEdit, ListWidget
 
 from neptune.core import carnames
@@ -14,6 +14,7 @@ from neptune.core.module import FeatureModule
 from neptune.ui.widgets.buttons import Button, DangerButton, PrimaryButton
 from neptune.ui.widgets.card import Banner, FieldRow
 from neptune.ui.widgets.controls import BindButton
+from neptune.ui.widgets.marquee import MarqueeLabel
 
 ACTIVE_MARK = "●"
 INACTIVE_MARK = "○"
@@ -58,26 +59,12 @@ class TunesModule(FeatureModule):
 
     def on_attach(self, vehicle) -> None:
         self.vehicle = vehicle
-        self._key = store.car_key(vehicle.identity_fingerprint()) if vehicle else None
-        self._adopt_name(vehicle)
+        self._key = store.car_key(vehicle.media_name) if vehicle else None
+        self._message = ""  # a "Saved ..." from the previous car must not show on this one
         self._dirty = True
 
     def on_car_changed(self, vehicle) -> None:
-        self.vehicle = vehicle
-        self._key = store.car_key(vehicle.identity_fingerprint()) if vehicle else None
-        self._adopt_name(vehicle)
-        self._dirty = True
-
-    def _adopt_name(self, vehicle) -> None:
-        """Name the car from the game's own record, so nobody has to type one.
-
-        Only fills a blank: a name the user chose themselves is never overwritten.
-        """
-        if vehicle is None or not self._key or self.store.car_name(self._key):
-            return
-        name = carnames.label(vehicle.media_name, vehicle.car_id, "")
-        if name:
-            self.store.set_car_name(self._key, name)
+        self.on_attach(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -90,6 +77,7 @@ class TunesModule(FeatureModule):
     def on_detach(self) -> None:
         self.vehicle = None
         self._key = None
+        self._message = ""
         self._dirty = True
 
     def tick(self, _vehicle) -> None:
@@ -121,7 +109,7 @@ class TunesModule(FeatureModule):
         """(index, "") of the attached car's tune a log was recorded with, or (-1, why not)."""
         if log is None or not self._key:
             return -1, "Attach the car that produced this log first."
-        logged_key = log.metadata.car.tune_key
+        logged_key = log.metadata.car.media_name or log.metadata.car.tune_key
         if logged_key and logged_key != self._key:
             return -1, "This log belongs to a different car. Attach that car first."
         metadata = log.metadata
@@ -290,8 +278,9 @@ class TunesModule(FeatureModule):
             "This car", "Named from the game. Rename it if you want your own label."
         )
 
-        car_label = QLabel("No car detected")
+        car_label = MarqueeLabel("No car detected")
         car_label.setObjectName("StatValue")
+        car_label.setMinimumWidth(1)
         self._widgets["car_label"] = car_label
         car_card.add(car_label)
 

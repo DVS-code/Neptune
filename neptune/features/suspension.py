@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 
@@ -473,7 +474,9 @@ class SuspensionModule(FeatureModule):
         if any(value is not None for value in self._camber):
             return
         values = vehicle.camber if vehicle else None
-        if not values or any(value is None for value in values):
+        # A NaN read here (car still loading) ended up in saved tunes and made tunes.json
+        # unwritable. Skip it; the next tick reads again.
+        if not values or any(value is None or not math.isfinite(value) for value in values):
             return
         self.stock_camber = list(values)
 
@@ -481,7 +484,7 @@ class SuspensionModule(FeatureModule):
         if any(value is not None for value in self._toe):
             return
         values = vehicle.toe if vehicle else None
-        if not values or any(value is None for value in values):
+        if not values or any(value is None or not math.isfinite(value) for value in values):
             return
         self.stock_toe = list(values)
 
