@@ -1006,13 +1006,16 @@ class SuspensionModule(FeatureModule):
         elif self.vehicle is not None:
             self._write_toe()
 
-    def _write_camber(self, values=None) -> bool:
+    def _write_camber(self, values=None, restoring: bool = False) -> bool:
         """Write held per-wheel camber. O.Wheels.ORDER is (FL, FR, RR, RL);
         vehicle.set_camber() takes one verbatim value per wheel, so each
         corner is independent here, no axle mirroring.
+
+        The Camber card's switch only arms its own sliders: air-ride camber has its own
+        switch, and putting stock back (`restoring`) must happen even with both off.
         """
         vehicle = self.vehicle
-        if vehicle is None or not self._camber_enabled:
+        if vehicle is None or not (restoring or self._camber_enabled or self._air_camber):
             return False
         return bool(vehicle.set_camber(self._camber if values is None else values))
 
@@ -1076,7 +1079,7 @@ class SuspensionModule(FeatureModule):
                 # there's nothing to enforce.
                 restore_stock = not any(value is not None for value in self._camber)
         if restore_stock and self.stock_camber:
-            self._write_camber(self.stock_camber)
+            self._write_camber(self.stock_camber, restoring=True)
         else:
             self._write_active_camber()
         self._sync_controls()
@@ -1114,7 +1117,7 @@ class SuspensionModule(FeatureModule):
             slider = self._widgets.get(key)
             if slider is not None and value is not None:
                 slider.set_value(value)
-        self._write_camber()
+        self._write_camber(restoring=True)
         self._camber = [None, None, None, None]
 
     def _write_track(self) -> bool:
@@ -1179,9 +1182,10 @@ class SuspensionModule(FeatureModule):
             value if value is not None else stock[index] for index, value in enumerate(self._toe)
         ]
 
-    def _write_toe(self, values=None) -> bool:
+    def _write_toe(self, values=None, restoring: bool = False) -> bool:
         vehicle = self.vehicle
-        if vehicle is None or not self._toe_enabled:
+        # Putting stock back (`restoring`) must happen even with the Toe switch off.
+        if vehicle is None or not (restoring or self._toe_enabled):
             return False
         target = self._configured_toe() if values is None else values
         if any(value is None for value in target):
@@ -1219,8 +1223,14 @@ class SuspensionModule(FeatureModule):
             slider = self._widgets.get(key)
             if slider is not None and value is not None:
                 slider.set_value(value)
-        self._write_toe()
+        self._write_toe(restoring=True)
         self._toe = [None, None, None, None]
+
+    def _on_airride_toggled(self, enabled: bool) -> None:
+        # Only the user's own click is remembered: applying a tune also calls
+        # set_airride_enabled, and must not overwrite the saved preference.
+        self.settings.remember("suspension_airride_enabled", bool(enabled))
+        self.set_airride_enabled(enabled)
 
     def set_airride_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)
@@ -1228,7 +1238,6 @@ class SuspensionModule(FeatureModule):
             return
 
         self._airride_enabled = enabled
-        self.settings.remember("suspension_airride_enabled", enabled)
         self._edge.reset()
 
         if not enabled and self._lowered and not self._bounce and not self._hydraulics:
@@ -2173,7 +2182,7 @@ class SuspensionModule(FeatureModule):
             self._airride_enabled,
             hint=HINT_AIRRIDE_ENABLED,
         )
-        airride_enabled.toggle.toggled_value.connect(self.set_airride_enabled)
+        airride_enabled.toggle.toggled_value.connect(self._on_airride_toggled)
         self._widgets["airride_enabled"] = airride_enabled
         air_card.add(airride_enabled)
 

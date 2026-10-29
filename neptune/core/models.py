@@ -56,9 +56,8 @@ class CarIdentity:
     """Who the log belongs to.
 
     `fingerprint` is the runtime identity (media name and engine config), used to compare two
-    logs. `tune_key` is the Tunes store key the car had when the run was captured: the store key
-    samples the idle and curve-count fields the cam and rev limiter write, so it cannot be
-    recomputed from a later reading and is recorded as-is.
+    logs. `tune_key` is the Tunes store key the car had when the run was captured; logs written
+    before 1.1.7 hold an older key format that no longer matches any car.
     """
 
     car_id: int | None = None

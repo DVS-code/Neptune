@@ -25,8 +25,10 @@ def load_game_names(exe_path: str | None) -> int:
         archive_path = os.path.join(os.path.dirname(exe_path), *STRING_TABLE_ZIP)
         try:
             with zipfile.ZipFile(archive_path) as archive:
-                strings = parse_string_table(archive.read(STRING_TABLE_ENTRY))
-        except (OSError, KeyError, zipfile.BadZipFile):
+                # Entry names in the game's archives are inconsistently cased.
+                entry = next(n for n in archive.namelist() if n.lower() == STRING_TABLE_ENTRY.lower())
+                strings = parse_string_table(archive.read(entry))
+        except (OSError, StopIteration, zipfile.BadZipFile):
             strings = {}
         for key, text in strings.items():
             match = DISPLAY_NAME_KEY.fullmatch(key)

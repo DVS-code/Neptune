@@ -135,7 +135,7 @@ class FieldRow(QWidget):
 
 
 class Stat(QWidget):
-    def __init__(self, caption: str, value: str = "--", unit: str = "", parent=None):
+    def __init__(self, caption: str, value: str = "--", unit: str = "", scroll: bool = False, parent=None):
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -149,10 +149,11 @@ class Stat(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(5)
 
-        self._value = MarqueeLabel(value)
+        self._value = MarqueeLabel(value) if scroll else QLabel(value)
         self._value.setObjectName("StatValue")
-        # Allowed below its text width: a long value (a car name) scrolls instead of clipping.
-        self._value.setMinimumWidth(1)
+        if scroll:
+            # Allowed below its text width: a long value (a car name) scrolls instead of clipping.
+            self._value.setMinimumWidth(1)
         row.addWidget(self._value)
 
         self._unit = QLabel(unit)
@@ -193,8 +194,9 @@ class StatStrip(QWidget):
         # refuses to narrow and the wrap never triggers - it just clips instead.
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-    def add(self, key: str, caption: str, value: str = "--", unit: str = "") -> Stat:
-        stat = Stat(caption, value, unit)
+    def add(self, key: str, caption: str, value: str = "--", unit: str = "", scroll: bool = False) -> Stat:
+        """`scroll` for free text that can be long (a car or tune name), not live numbers."""
+        stat = Stat(caption, value, unit, scroll)
         stat.setMinimumWidth(STAT_MIN_WIDTH)
         self._stats[key] = stat
         self._order.append(stat)

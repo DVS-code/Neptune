@@ -160,10 +160,13 @@ class TunesModule(FeatureModule):
         ok, message = self.store.update_tune(self._key, created, state)
         if not ok:
             return False, message
-        self.store.add_change(self._key, created, f"Applied suggestion: {suggestion.title} — {suggestion.evidence}")
+        noted = self.store.add_change(self._key, created, f"Applied suggestion: {suggestion.title} — {suggestion.evidence}")
         if not self._apply(created):
             return False, "The new revision was saved but could not be applied to the live car."
-        self._notify(f'Applied suggestion as new revision "{self.store.tune(self._key, created).get("name", "")}".', True)
+        unsaved = "" if noted else " Its change note could not be saved."
+        self._notify(
+            f'Applied suggestion as new revision "{self.store.tune(self._key, created).get("name", "")}".{unsaved}', True
+        )
         return True, self._message
 
     @property
@@ -190,9 +193,10 @@ class TunesModule(FeatureModule):
                 self._notify(f'Could not apply "{entry.get("name", "")}".', False)
                 return False
 
-        self.store.set_active(self._key, index)
-        if announce:
-            self._notify(f'Applied "{entry.get("name", "")}".', True)
+        remembered = self.store.set_active(self._key, index)
+        if announce or not remembered:
+            unsaved = "" if remembered else " It could not be saved as this car's active tune."
+            self._notify(f'Applied "{entry.get("name", "")}".{unsaved}', remembered)
         self._dirty = True
         return True
 

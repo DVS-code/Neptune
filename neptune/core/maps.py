@@ -7,6 +7,7 @@ the car model they were saved on, so switching tunes never loads another car's s
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -74,6 +75,21 @@ def _migrate(stored: dict) -> dict:
     return data
 
 
+def _finite(value):
+    """Drop non-finite numbers: json refuses NaN/inf, and one of them anywhere in the
+    document used to make every save fail. In a dict the key is dropped, so the module
+    falls back to its default; in a list it becomes None."""
+    if isinstance(value, dict):
+        return {
+            key: _finite(item)
+            for key, item in value.items()
+            if not (isinstance(item, float) and not math.isfinite(item))
+        }
+    if isinstance(value, list):
+        return [None if isinstance(item, float) and not math.isfinite(item) else _finite(item) for item in value]
+    return value
+
+
 def car_key(media_name: str | None) -> str | None:
     """The store key for a car: its internal model name.
 
@@ -91,6 +107,7 @@ class TuneStore:
         self._lock = threading.RLock()
         self._data = {"schema": STORE_SCHEMA, "cars": {}}
         self._blocked = False
+        self._saved = deepcopy(self._data)
         self.load()
 
     def load(self) -> None:
@@ -101,13 +118,18 @@ class TuneStore:
                 with open(self.path, encoding="utf-8") as handle:
                     stored = json.load(handle)
             except FileNotFoundError:
-                return
-            except (OSError, ValueError):
+                stored = {"cars": {}}
+            except ValueError:
                 stored = None
+            except OSError:
+                # Exists but can't be read right now (locked): never overwrite it.
+                self._blocked = True
+                return
             if isinstance(stored, dict) and isinstance(stored.get("cars"), dict):
                 self._data = _migrate(stored)
+                self._saved = deepcopy(self._data)
                 return
-            # Unusable file: move it aside so the next save can't overwrite it with nothing.
+            # Corrupt file: move it aside so the next save can't overwrite it with nothing.
             try:
                 os.replace(self.path, self.path + time.strftime(".unreadable-%Y%m%d-%H%M%S"))
             except OSError:
@@ -115,16 +137,18 @@ class TuneStore:
 
     def save(self) -> bool:
         with self._lock:
-            if self._blocked:
+            if self._blocked or not paths.write_json(self.path, self._data):
                 return False
-            return paths.write_json(self.path, self._data)
+            self._saved = deepcopy(self._data)
+            return True
 
     def _save_or_revert(self) -> bool:
-        """On a failed save, reload so the list never shows a tune that isn't on disk."""
+        """On a failed save, go back to the last saved state so the list never shows a tune
+        that isn't on disk. It doesn't re-read the file: that may be what is locked."""
         with self._lock:
             if self.save():
                 return True
-            self.load()
+            self._data = deepcopy(self._saved)
             return False
 
     def _commit(self, message: str) -> tuple[bool, str]:
@@ -193,7 +217,7 @@ class TuneStore:
                 if tune.get("name", "").lower() == cleaned.lower():
                     if tune.get("logs"):
                         return False, "This revision has recorded logs; duplicate it before editing."
-                    tune["state"] = state
+                    tune["state"] = _finite(state)
                     tune["modified_at"] = utc_now()
                     return self._commit(f'Updated "{cleaned}".')
             if len(tunes) >= MAX_TUNES_PER_CAR:
@@ -206,7 +230,7 @@ class TuneStore:
                     "revision": 1,
                     "created_at": now,
                     "modified_at": now,
-                    "state": state,
+                    "state": _finite(state),
                     "logs": [],
                     "results": {},
                     "changes": [],
@@ -222,7 +246,7 @@ class TuneStore:
                 return False, "That tune no longer exists."
             if record["tunes"][index].get("logs"):
                 return False, "This revision has recorded logs; duplicate it before editing."
-            record["tunes"][index]["state"] = state
+            record["tunes"][index]["state"] = _finite(state)
             record["tunes"][index]["modified_at"] = utc_now()
             name = record["tunes"][index].get("name", "")
             return self._commit(f'Updated "{name}".')
@@ -306,7 +330,7 @@ class TuneStore:
             if log_id not in logs:
                 logs.append(log_id)
             if isinstance(results, dict):
-                tune["results"] = dict(results)
+                tune["results"] = _finite(dict(results))
             tune["modified_at"] = utc_now()
             return self._save_or_revert()
 

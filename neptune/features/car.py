@@ -71,13 +71,13 @@ class CarModule(FeatureModule):
 
         identity = page.add_card("This car")
         strip = StatStrip()
-        strip.add("name", "Name")
+        strip.add("name", "Name", scroll=True)
         strip.add("id", "Car ID")
-        strip.add("engine", "Induction")
-        strip.add("tune", "Current tune")
+        strip.add("engine", "Induction", scroll=True)
+        strip.add("tune", "Current tune", scroll=True)
         strip.add("revision", "Revision")
         strip.add("runs", "Logged runs")
-        strip.add("recent", "Recent log")
+        strip.add("recent", "Recent log", scroll=True)
         strip.add("result", "Last result")
         self._widgets["identity"] = strip
         identity.add(strip)
