@@ -68,11 +68,50 @@ KEY_TABLE = [
     ("Mouse 3", 0x04),
     ("Mouse 4", 0x05),
     ("Mouse 5", 0x06),
+    *((letter, ord(letter)) for letter in "ADIMOPSW"),
+    *((digit, ord(digit)) for digit in "1234567890"),
+    ("Right Shift", 0xA1),
+    ("Enter", 0x0D),
+    ("Up", 0x26),
+    ("Down", 0x28),
+    ("Left", 0x25),
+    ("Right", 0x27),
+    ("Insert", 0x2D),
+    ("Delete", 0x2E),
+    ("Home", 0x24),
+    ("End", 0x23),
+    ("Page Up", 0x21),
+    ("Page Down", 0x22),
+    ("Numpad /", 0x6F),
+    ("Numpad *", 0x6A),
+    ("Numpad -", 0x6D),
+    ("Numpad +", 0x6B),
 ]
 KEY_BY_CODE = {code: label for label, code in KEY_TABLE}
 
 ESCAPE_VK = 0x1B
 BACKSPACE_VK = 0x08
+
+NOT_BINDABLE = {
+    0x01,  # left click: the click on the bind button itself would be captured
+    0x02,  # right click
+    0x10,  # generic Shift/Ctrl/Alt: the left/right codes are bound instead
+    0x11,
+    0x12,
+    0x5B,  # Windows keys open the Start menu
+    0x5C,
+    ESCAPE_VK,  # Escape and Backspace clear a binding
+    BACKSPACE_VK,
+}
+"""Every other virtual-key code can be bound. KEY_TABLE comes first only for its labels."""
+
+SCAN_ORDER = [code for _, code in KEY_TABLE] + [
+    code for code in range(0x03, 0xFF) if code not in KEY_BY_CODE and code not in NOT_BINDABLE
+]
+
+# Keys whose scan code needs the "extended" flag to get their own name rather than the
+# numpad key sharing it.
+_EXTENDED = {0x90, 0x5D}
 
 PAD_TABLE = [
     ("A", 0x1000),
@@ -153,9 +192,22 @@ def pad_down(code: int, index: int = 0) -> bool:
     return bool(gamepad.wButtons & code)
 
 
+def key_label(code: int) -> str:
+    """Our own label for the common keys, else the name Windows gives the key."""
+    if code in KEY_BY_CODE:
+        return KEY_BY_CODE[code]
+    scan = user32.MapVirtualKeyW(code, 0)  # MAPVK_VK_TO_VSC
+    if scan:
+        buffer = ctypes.create_unicode_buffer(64)
+        lparam = (scan << 16) | (1 << 24 if code in _EXTENDED else 0)
+        if user32.GetKeyNameTextW(lparam, buffer, len(buffer)) > 0:
+            return buffer.value
+    return f"Key {code:#04x}"
+
+
 def make_binding(kind: str, code: int) -> dict:
-    table = KEY_BY_CODE if kind == "key" else PAD_BY_CODE
-    return {"kind": kind, "code": int(code), "label": table.get(code, "Unknown")}
+    label = key_label(code) if kind == "key" else PAD_BY_CODE.get(code, "Unknown")
+    return {"kind": kind, "code": int(code), "label": label}
 
 
 def source_label(binding: dict | None) -> str:
@@ -195,7 +247,7 @@ def poll_any_key() -> dict | None:
     """The key currently held, or a clear request for Escape and Backspace."""
     if key_down(ESCAPE_VK) or key_down(BACKSPACE_VK):
         return {"clear": True}
-    for _, code in KEY_TABLE:
+    for code in SCAN_ORDER:
         if key_down(code):
             return make_binding("key", code)
     return None

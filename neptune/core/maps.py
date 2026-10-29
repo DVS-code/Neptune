@@ -1,15 +1,17 @@
 """Per-car tune storage.
 
 A tune captures the engine, turbo and transmission settings for one car. Tunes are scoped to
-the car they were saved on, so switching tunes never loads another car's setup.
+the car model they were saved on, so switching tunes never loads another car's setup.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
+import time
 import uuid
 from copy import deepcopy
 
@@ -29,6 +31,8 @@ STORE_SCHEMA = 2
 
 MAX_NAME_LENGTH = 40
 MAX_TUNES_PER_CAR = 12
+
+SAVE_FAILED = "Could not save to tunes.json. Nothing was changed."
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9 _\-()]+")
 
@@ -71,14 +75,28 @@ def _migrate(stored: dict) -> dict:
     return data
 
 
-def car_key(fingerprint) -> str | None:
-    """Stable string key for a car's identity."""
-    if not fingerprint:
-        return None
-    try:
-        return "|".join(str(part) for part in fingerprint)
-    except TypeError:
-        return None
+def _finite(value):
+    """Drop non-finite numbers: json refuses NaN/inf, and one of them anywhere in the
+    document used to make every save fail. In a dict the key is dropped, so the module
+    falls back to its default; in a list it becomes None."""
+    if isinstance(value, dict):
+        return {
+            key: _finite(item)
+            for key, item in value.items()
+            if not (isinstance(item, float) and not math.isfinite(item))
+        }
+    if isinstance(value, list):
+        return [None if isinstance(item, float) and not math.isfinite(item) else _finite(item) for item in value]
+    return value
+
+
+def car_key(media_name: str | None) -> str | None:
+    """The store key for a car: its internal model name.
+
+    Unlike engine values, it doesn't change with in-game upgrades or engine swaps.
+    """
+    name = (media_name or "").strip()
+    return name or None
 
 
 class TuneStore:
@@ -88,21 +106,55 @@ class TuneStore:
         self.path = path or os.path.join(paths.data_dir(), "tunes.json")
         self._lock = threading.RLock()
         self._data = {"schema": STORE_SCHEMA, "cars": {}}
+        self._blocked = False
+        self._saved = deepcopy(self._data)
         self.load()
 
     def load(self) -> None:
         with self._lock:
+            self._data = {"schema": STORE_SCHEMA, "cars": {}}
+            self._blocked = False
             try:
                 with open(self.path, encoding="utf-8") as handle:
                     stored = json.load(handle)
-                if isinstance(stored, dict) and isinstance(stored.get("cars"), dict):
-                    self._data = _migrate(stored)
-            except (OSError, ValueError):
-                self._data = {"schema": STORE_SCHEMA, "cars": {}}
+            except FileNotFoundError:
+                stored = {"cars": {}}
+            except ValueError:
+                stored = None
+            except OSError:
+                # Exists but can't be read right now (locked): never overwrite it.
+                self._blocked = True
+                return
+            if isinstance(stored, dict) and isinstance(stored.get("cars"), dict):
+                self._data = _migrate(stored)
+                self._saved = deepcopy(self._data)
+                return
+            # Corrupt file: move it aside so the next save can't overwrite it with nothing.
+            try:
+                os.replace(self.path, self.path + time.strftime(".unreadable-%Y%m%d-%H%M%S"))
+            except OSError:
+                self._blocked = True
 
     def save(self) -> bool:
         with self._lock:
-            return paths.write_json(self.path, self._data)
+            if self._blocked or not paths.write_json(self.path, self._data):
+                return False
+            self._saved = deepcopy(self._data)
+            return True
+
+    def _save_or_revert(self) -> bool:
+        """On a failed save, go back to the last saved state so the list never shows a tune
+        that isn't on disk. It doesn't re-read the file: that may be what is locked."""
+        with self._lock:
+            if self.save():
+                return True
+            self._data = deepcopy(self._saved)
+            return False
+
+    def _commit(self, message: str) -> tuple[bool, str]:
+        if self._save_or_revert():
+            return True, message
+        return False, SAVE_FAILED
 
     def _car(self, key: str, create: bool = False) -> dict | None:
         cars = self._data.setdefault("cars", {})
@@ -125,7 +177,7 @@ class TuneStore:
         with self._lock:
             record = self._car(key, create=True)
             record["name"] = cleaned
-            return self.save(), f'Named this car "{cleaned}".'
+            return self._commit(f'Named this car "{cleaned}".')
 
     def known_cars(self) -> list[tuple[str, str, int]]:
         """(key, name, tune count) for every car with saved data."""
@@ -150,7 +202,7 @@ class TuneStore:
             if not record:
                 return False
             record["active"] = int(index)
-            return self.save()
+            return self._save_or_revert()
 
     def add_tune(self, key: str, name: str, state: dict) -> tuple[bool, str]:
         if not key:
@@ -165,9 +217,9 @@ class TuneStore:
                 if tune.get("name", "").lower() == cleaned.lower():
                     if tune.get("logs"):
                         return False, "This revision has recorded logs; duplicate it before editing."
-                    tune["state"] = state
+                    tune["state"] = _finite(state)
                     tune["modified_at"] = utc_now()
-                    return self.save(), f'Updated "{cleaned}".'
+                    return self._commit(f'Updated "{cleaned}".')
             if len(tunes) >= MAX_TUNES_PER_CAR:
                 return False, f"This car already has {MAX_TUNES_PER_CAR} tunes."
             now = utc_now()
@@ -178,14 +230,14 @@ class TuneStore:
                     "revision": 1,
                     "created_at": now,
                     "modified_at": now,
-                    "state": state,
+                    "state": _finite(state),
                     "logs": [],
                     "results": {},
                     "changes": [],
                 }
             )
             record["active"] = len(tunes) - 1
-            return self.save(), f'Saved "{cleaned}".'
+            return self._commit(f'Saved "{cleaned}".')
 
     def update_tune(self, key: str, index: int, state: dict) -> tuple[bool, str]:
         with self._lock:
@@ -194,10 +246,10 @@ class TuneStore:
                 return False, "That tune no longer exists."
             if record["tunes"][index].get("logs"):
                 return False, "This revision has recorded logs; duplicate it before editing."
-            record["tunes"][index]["state"] = state
+            record["tunes"][index]["state"] = _finite(state)
             record["tunes"][index]["modified_at"] = utc_now()
             name = record["tunes"][index].get("name", "")
-            return self.save(), f'Updated "{name}".'
+            return self._commit(f'Updated "{name}".')
 
     def rename_tune(self, key: str, index: int, name: str) -> tuple[bool, str]:
         cleaned = clean_name(name)
@@ -209,7 +261,7 @@ class TuneStore:
                 return False, "That tune no longer exists."
             record["tunes"][index]["name"] = cleaned
             record["tunes"][index]["modified_at"] = utc_now()
-            return self.save(), f'Renamed to "{cleaned}".'
+            return self._commit(f'Renamed to "{cleaned}".')
 
     def tune(self, key: str, index: int) -> dict | None:
         record = self._car(key)
@@ -263,9 +315,11 @@ class TuneStore:
                 }
             )
             record.setdefault("tunes", []).append(clone)
-            record["active"] = len(record["tunes"]) - 1
-            ok = self.save()
-            return ok, (f'Created "{candidate}".' if ok else "Could not save the duplicated tune."), record["active"]
+            created = len(record["tunes"]) - 1
+            record["active"] = created
+            if not self._save_or_revert():
+                return False, SAVE_FAILED, -1
+            return True, f'Created "{candidate}".', created
 
     def record_log(self, key: str, index: int, log_id: str, results: dict | None = None) -> bool:
         with self._lock:
@@ -276,9 +330,9 @@ class TuneStore:
             if log_id not in logs:
                 logs.append(log_id)
             if isinstance(results, dict):
-                tune["results"] = dict(results)
+                tune["results"] = _finite(dict(results))
             tune["modified_at"] = utc_now()
-            return self.save()
+            return self._save_or_revert()
 
     def add_change(self, key: str, index: int, summary: str) -> bool:
         """Append a bounded human-readable reason to a tune revision."""
@@ -290,7 +344,7 @@ class TuneStore:
             changes.append({"summary": str(summary).strip()[:200], "at": utc_now()})
             del changes[:-32]
             tune["modified_at"] = utc_now()
-            return self.save()
+            return self._save_or_revert()
 
     def delete_tune(self, key: str, index: int) -> tuple[bool, str]:
         with self._lock:
@@ -303,13 +357,13 @@ class TuneStore:
                 record["active"] = -1
             elif active > index:
                 record["active"] = active - 1
-            return self.save(), f'Deleted "{removed.get("name", "")}".'
+            return self._commit(f'Deleted "{removed.get("name", "")}".')
 
     def delete_car(self, key: str) -> bool:
         with self._lock:
             if self._data.get("cars", {}).pop(key, None) is None:
                 return False
-            return self.save()
+            return self._save_or_revert()
 
     def next_index(self, key: str) -> int:
         """The tune the cycle key should move to, or -1 when this car has none."""

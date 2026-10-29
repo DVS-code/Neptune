@@ -346,19 +346,23 @@ class DynoModule(DragyModule):
         if not ok:
             QMessageBox.warning(box, "Save log", message)
         else:
-            self._associate_log(path, log)
+            if not self._associate_log(path, log):
+                QMessageBox.warning(
+                    box, "Save log", "The log was saved, but it could not be linked to the current tune."
+                )
             logs = self._module("logs")
             if open_reader is clicked and logs is not None:
                 logs.open_reader(path)
         self._pending_log = None
         self._capture_state = "idle"
 
-    def _associate_log(self, path: str, log: NeptuneLog) -> None:
+    def _associate_log(self, path: str, log: NeptuneLog) -> bool:
+        """False only when there was a tune to link and writing the link failed."""
         tunes = self._module("tunes")
         if tunes is None or tunes.current_tune() is None:
-            return
+            return True
         key = tunes.current_car_key
-        tunes.store.record_log(key, tunes.store.active_index(key), os.path.basename(path), log.analysis.metrics)
+        return tunes.store.record_log(key, tunes.store.active_index(key), os.path.basename(path), log.analysis.metrics)
 
     def _window(self):
         return self._page.window() if self._page is not None else None

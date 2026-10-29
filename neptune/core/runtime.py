@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
+from neptune.core import carnames
 from neptune.core.module import ModuleRegistry
 from neptune.memory import offsets as O
 from neptune.memory.process import Process, ProcessError
@@ -65,6 +66,7 @@ class Runtime:
         except ProcessError as error:
             self._set_status(STATE_DETACHED, str(error))
             return False, str(error)
+        carnames.load_game_names(self.process.executable_path)
         self._set_status(STATE_WAITING, "Attached. Waiting for a car.")
         self._acquire()
         self.start()
@@ -188,9 +190,8 @@ class Runtime:
             return
 
         vehicle = vehicles[0]
-        # The cam controller writes Car.IDLE_SPEED on every frame. That field
-        # remains part of the legacy tune key, but it must not participate in
-        # runtime car detection or the cam waveform looks like a new vehicle.
+        # The cam controller writes Car.IDLE_SPEED on every frame, so it must not take part
+        # in car detection or the cam waveform would look like a new vehicle.
         identity = vehicle.identity_fingerprint()
         previous = self._identity
         address = (vehicle.entity, vehicle.car)
