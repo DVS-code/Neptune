@@ -296,7 +296,7 @@ class TransmissionModule(FeatureModule):
             "Bar length shows the estimated speed at redline. Amber marks show next-gear landing RPM; cyan "
             "marks show the torque-equality shift estimate when the engine curve is available.",
         )
-        chart = GearingChart()
+        chart = GearingChart(self.settings)
         self._widgets["chart"] = chart
         chart_card.add(chart)
 

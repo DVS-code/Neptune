@@ -6,12 +6,16 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from neptune.memory import offsets as O
 from neptune.ui import theme as T
 
 
 class GearingChart(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, settings, parent=None):
         super().__init__(parent)
+        self._settings = settings
+        # The pages only call set_data when the gearing moves, so a unit change repaints here.
+        settings.subscribe(self._on_settings_changed)
         self.setMinimumHeight(230)
         self._rows: list[dict] = []
         self._redline = 8000.0
@@ -22,6 +26,10 @@ class GearingChart(QWidget):
         self._redline = max(1.0, float(redline or 8000.0))
         self._live_gear = live_gear
         self.update()
+
+    def _on_settings_changed(self, key: str) -> None:
+        if key == "speed_unit":
+            self.update()
 
     def sizeHint(self):
         return QSize(650, 250)
@@ -66,7 +74,8 @@ class GearingChart(QWidget):
             painter.setFont(QFont("Segoe UI", 9, 650))
             painter.drawText(QRectF(4, y, 45, row_height - 7), Qt.AlignRight | Qt.AlignVCenter, f"G{row.get('gear')}")
             painter.setPen(QColor(T.TEXT))
-            painter.drawText(bar.adjusted(8, 0, -8, 0), Qt.AlignLeft | Qt.AlignVCenter, f"{row.get('top_speed_kph', 0):.0f} km/h")
+            top_speed = self._settings.format_speed(float(row.get("top_speed_kph") or 0.0) / O.MS_TO_KPH)
+            painter.drawText(bar.adjusted(8, 0, -8, 0), Qt.AlignLeft | Qt.AlignVCenter, top_speed)
             landed = float(row.get("shift_landing_rpm") or 0.0)
             if landed > 0.0:
                 marker_x = plot.left() + plot.width() * min(self._redline, landed) / self._redline

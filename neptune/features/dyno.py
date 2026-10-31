@@ -754,7 +754,7 @@ class DynoModule(DragyModule):
             "Use the same verified gearing model beside the dyno curve. Amber markers show estimated shift landings.",
         )
         detail_cards.append(gearing_card)
-        gearing_chart = GearingChart()
+        gearing_chart = GearingChart(self.settings)
         self._dyno_widgets["gearing_chart"] = gearing_chart
         gearing_card.add(gearing_chart)
 
