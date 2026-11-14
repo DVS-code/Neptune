@@ -16,6 +16,7 @@ from neptune.core.settings import Settings
 from neptune.features.car import CarModule
 from neptune.features.dyno import DynoModule
 from neptune.features.engine import EngineModule
+from neptune.features.lighting import LightingModule
 from neptune.features.logs import LogsModule
 from neptune.features.presets import PresetsModule
 from neptune.features.settings import SettingsModule
@@ -40,6 +41,7 @@ def build_registry(settings: Settings) -> ModuleRegistry:
 
     registry.register(SuspensionModule(settings))
     registry.register(TransmissionModule(settings))
+    registry.register(LightingModule(settings))
     registry.register(CarModule(settings, registry))
     registry.register(DynoModule(settings, registry))
     registry.register(TunesModule(registry, settings))

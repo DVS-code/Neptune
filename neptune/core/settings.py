@@ -32,6 +32,9 @@ DEFAULTS = {
     "suspension_airride_enabled": True,
     "dyno_enabled": False,
     "transmission_enabled": False,
+    "lighting_enabled": False,
+    # Lighting look (colours, fades, switches). Signals are never remembered.
+    "lighting_state": {},
     "bindings": {},
 }
 

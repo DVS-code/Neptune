@@ -4,7 +4,7 @@
 
 > A live tuning tool for Forza Horizon 6 on PC.
 Neptune connects to the running game and lets you change how your car behaves
-while you drive: torque delivery, boost and ride height.
+while you drive: torque delivery, boost, ride height and lighting.
 <br>
 <br>
 <p align="center">
@@ -18,13 +18,14 @@ while you drive: torque delivery, boost and ride height.
 | **Engine** | Reshape the torque curve by dragging it, set a torque multiplier and rev limit, tune a live RPM/throttle cam profile, hold anti-lag on a key to build boost off the line, and build extra boost while the game's own launch control holds you. |
 | **Turbo** | Boost ceiling, extra torque, spool behaviour, synthetic lag, per-gear boost, a boost map you can shape per engine speed, and a scramble button for a burst of boost on demand. |
 | **Suspension** | Set ride height per axle as a percentage, and drop the car on a key press with a smooth ramp, or bounce it between two heights. Manual lowrider hydraulics — hop an axle, a side or a single corner, hold a front/back/left/right down pose, or slam all four up or down, each bindable to its own key. Camber, track width and toe, per wheel or mirrored per axle, with camber optionally shifting to its own values whenever air ride drops. Warns when a car's rear axle or tires won't respond to these. |
+| **Lighting** | Take control of the car's lights: headlights, daytime running lights, high beam, fog lights, sidelights and brake lights, plus hazards and indicators using the car's own blink pattern. Light the front or rear on its own, set how long lights fade on and off, and recolour any group of lamps with a fixed colour, a rainbow or a two-colour cycle, up to 400% brightness, with an optional strobe. Lamps a car never lights, such as some rear turn signals, can be wired to the indicators. |
 | **DYNO** | New read-only dyno setup with selectable output units, torque/power graph, peak figures, live channels, engine details, an optional Graph/Numbers overlay, Dragy runs and the Boost Gauge in one place. |
 | **Car** | Shows which car you’re currently in, along with a preview of the car and how it’s aspirated.. |
 | **Tunes** | Save your engine and turbo setup per car and switch between saved tunes with one key while driving. |
 | **Presets** | Save and reload whole setups. |
 | **Settings** | Units, display and startup behaviour. |
 
-Anti-lag, launch control, air ride, hydraulics, scramble and tune switching can
+Anti-lag, launch control, air ride, hydraulics, scramble, lighting and tune switching can
 each be bound to a key, a controller button or a racing-wheel button, on their
 own tab. A control only ever drives one feature — binding one that is already
 in use takes it from whatever held it.

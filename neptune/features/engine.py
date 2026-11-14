@@ -313,6 +313,7 @@ class EngineModule(FeatureModule):
         if vehicle is None:
             return
         self.stock_curve = vehicle.curve()
+        # Validated in game: this car-level field is the live idle-control input, and the
         # game mirrors it into the engine model field.
         self._cam_idle_stock_rpm = vehicle.idle_rpm
         if self._rev_limit is None:
@@ -488,7 +489,15 @@ class EngineModule(FeatureModule):
                 self._turbo.ramp_turbine()
 
     def _tick_launch(self, vehicle) -> bool:
-        """Spool the turbo while held and bridge the release into the launch."""
+        """Spool the turbo while held and bridge the release into the launch.
+
+        The GAME's own launch control holds the rpm - we do not touch the rev
+        wall at all. All this does is ramp the turbine to its ceiling so the
+        launch happens on full boost instead of whatever the game spools on its
+        own. On release, a short handoff supports the low/mid-RPM curve while
+        the drivetrain loads, preventing the measured drop-and-recovery.
+        Returns True while it owns the tick.
+        """
         if not inp.is_down(self.launch_binding()):
             if self._launch_engaged:
                 self._launch_engaged = False
@@ -810,7 +819,14 @@ class EngineModule(FeatureModule):
         vehicle.set_idle_rpm(self._cam_idle_stock_rpm)
 
     def _tick_cam(self, vehicle) -> None:
-        """Apply the reversible cam overlay at a modest write rate."""
+        """Apply the reversible cam overlay at a modest write rate.
+
+        The validated car idle target is the primary low-RPM lope control. The
+        curve overlay remains a secondary, reversible shape for cars/ranges
+        where the curve is read. We deliberately do not write an arbitrary
+        audio-emitter address: the current build's ``CamshaftRPMScalar`` is
+        schema metadata, not a proven player-car scalar.
+        """
         handoff_active = self._launch_handoff_active()
         if (
             not self._cam_enabled
