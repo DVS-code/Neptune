@@ -21,6 +21,7 @@ from neptune.ui.widgets.transitioncurve import (
     curve_value,
     normalise_curve,
 )
+from neptune.vehicle import ignition
 
 RAMP_HZ = 60
 DEFAULT_RAMP_SECONDS = 2.5
@@ -211,6 +212,9 @@ class SuspensionModule(FeatureModule):
         self._airride_enabled = bool(settings.get("suspension_airride_enabled"))
         self._enabled = bool(settings.get("suspension_enabled"))
         self._lowered = False
+        # Engine state last seen, for "air ride follows the engine" (Settings). None until the
+        # first reading, so attaching to a car never counts as the engine changing.
+        self._engine_seen: bool | None = None
 
         self._height_enabled = False
         self._camber_enabled = False
@@ -602,6 +606,7 @@ class SuspensionModule(FeatureModule):
         self._write_grip(vehicle)
 
     def on_car_changed(self, vehicle) -> None:
+        self._engine_seen = None
         self._cancel_hydraulics_no_restore()
         if self._bounce:
             self._bounce = False
@@ -637,6 +642,7 @@ class SuspensionModule(FeatureModule):
         self._check_rear_axle(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
+        self._engine_seen = None
         self.vehicle = vehicle
         if not self._enabled:
             return
@@ -769,6 +775,7 @@ class SuspensionModule(FeatureModule):
         if self._airride_enabled and self._edge.pressed(self.binding()):
             self.toggle()
         elif not self._airride_enabled:
+            self._engine_seen = None
             # Do not let a key held while the feature is disabled fire as soon
             # as the user enables it again.
             self._edge.reset()
@@ -790,6 +797,8 @@ class SuspensionModule(FeatureModule):
                 edge = self._hydraulics_edges[action]
                 if edge.pressed(self._hydraulics_binding(bindings, action)):
                     self._manual_all_press(action)
+
+        self._follow_engine(vehicle)
 
         self._reapply_if_rebaked(vehicle)
         self._reapply_camber_if_rebaked(vehicle)
@@ -1261,6 +1270,24 @@ class SuspensionModule(FeatureModule):
                         self._start_camber_ramp(start_camber, camber_target, self._ramp_seconds)
 
         self._controls_dirty = True
+
+    def _follow_engine(self, vehicle) -> None:
+        """Air out when the engine stops and air up when it starts (Settings).
+
+        Acts only on a CHANGE of engine state, never on the state itself, so attaching to a car,
+        a reload or turning the option on never drops the car by surprise.
+        """
+        if not self._airride_enabled or not self.settings.get("airride_follows_engine"):
+            self._engine_seen = None
+            return
+        running = ignition.engine_on(vehicle.process, vehicle.entity)
+        if running is None:
+            return
+        previous, self._engine_seen = self._engine_seen, running
+        if previous is None or previous == running:
+            return
+        if running == self._lowered:  # engine on while aired out, or off while up
+            self.toggle()
 
     def toggle(self) -> None:
         if not self._enabled or not self._airride_enabled:

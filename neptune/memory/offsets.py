@@ -413,6 +413,112 @@ LAMP_CHANNEL_MAX = 72
 NATIVE_STROBE_CHANNEL = 49  # "Flashing pattern 1": a 10 Hz x 1 Hz loop, gated on the engine
 
 
+class Ignition:
+    """Engine on/off on the entity.
+
+    The game's own setter is the entity's vtable slot `SETTER_SLOT`: it gates AI starts, keeps
+    the spin-down rpm, writes ENGINE_ON and its lighting mirror, and resets a small state cache
+    when the state changes. Neptune calls it rather than writing the bytes, so all of that still
+    happens. It is resolved from the live vtable every time and checked against `SETTER_SIG`,
+    whose `?? ??` must read back as ENGINE_ON, so a moved or changed setter is never called.
+
+    Ignition alone does not stop the car driving, so `DRIVE_POWER` (0..1, the engine's share of
+    drive torque) is held at 0 while the engine is off.
+    """
+
+    SETTER_SLOT = 0x268
+    SETTER_SIG = (
+        "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 0F B6 99 ? ? 00 00 0F B6 FA 48 8B F1 E8"
+    )
+    SETTER_FIELD_AT = 18  # offset of ENGINE_ON's disp32 inside SETTER_SIG
+    ENGINE_ON = 0x9278
+    ENGINE_MIRROR = 0x924E
+    DRIVE_POWER = 0x94B0
+    MODE_FLAG = 0x77B0  # <= 1 for a normally driven car
+    CAR_MODE = 0x78E8  # 0 = the local player
+
+
+class Animation:
+    """The car's animation component (doors, panels, pop-ups...).
+
+    Its parameters are named by FNV-1a-32 hashes. Panel events (`doorLF_open`...) do not exist
+    until the game's setter first creates them, so they are fired by calling that setter
+    (`TRIGGER_SIG`, signature-resolved) with (component, &hash, value). The setter takes the
+    runtime's own lock and queues the change if the graph is mid-update, so it is safe to call
+    from another thread. Free-roam panels animate only while `PRESENTATION` is 1.
+    """
+
+    ENTITY_TO_COMPONENT = 0x7920
+    COMPONENT_TO_RUNTIME = 0x28
+    RUNTIME_READY = 0x31  # u8, non-zero once the graph is loaded
+    RUNTIME_GRAPHS = 0x210  # u32, non-zero once the graph is loaded
+    COMPONENT_TO_PROXY = 0xB8  # == Render.ENTITY_TO_PROXY's target
+    PRESENTATION = 0x82A3
+    TRIGGER_SIG = (
+        "48 89 5C 24 10 56 57 41 56 48 83 EC 20 41 0F B6 F0 4C 8B F2 4C 8B 49 28 4D 85 C9 0F 84 ? ? ? ? "
+        "41 0F B6 41 31 90 84 C0 0F 84 ? ? ? ? 41 83 B9 10 02 00 00 00"
+    )
+    PULSE_SECONDS = 0.05  # events are asserted for about one update, then released
+
+
+class Driver:
+    """Driver visibility on the player render model: one byte the model's own getter returns.
+
+    Its offset is read out of the getter (`MOV EAX, byte [rcx+disp32]; RET`) found in the live
+    model vtable, and must match the setter's (`MOV [rcx+disp32], dl; RET`)."""
+
+    GETTER_SLOT = 0x480
+    SETTER_SLOT = 0x478
+    GETTER_SIG = "0F B6 81 ? ? 00 00 C3"
+    SETTER_SIG = "88 91 ? ? 00 00 C3"
+    FIELD_AT = 3  # disp32 position in both signatures
+
+
+class Wipers:
+    """The wiper simulation's state on the entity (23 bytes from PHASE)."""
+
+    PHASE = 0x9128  # f32, 0 = parked
+    DURATION = 0x912C  # f32 seconds for one sweep
+    TIMER = 0x9138  # f32
+    FLAG = 0x913C  # u8
+    STATE = 0x913D  # u8: 0/1 parked, 2 = sweep requested, 3 = sweeping
+    REQUEST = 2
+    SWEEPING = 3
+
+
+class MaxDetail:
+    """The render-mode controller that decides how much car detail the world renders.
+
+    The game requests a mode with RequestMode(controller, mode, option), which saves the current
+    mode as previous, writes the new one and the option, then sets PENDING last. Neptune
+    publishes the same fields in the same order; the game performs the transition itself.
+
+    The render system is found from a global that ~100 code sites read as
+    `mov reg,[rip+G]; mov reg,[reg+0x1D8]`; the global the most sites agree on wins
+    (`GLOBAL_SIGS`), with `GLOBAL_FALLBACK` (RVA on 6.483.970) behind it.
+    """
+
+    GLOBAL_SIGS = (
+        "48 8B 05 ? ? ? ? 48 8B 90 D8 01 00 00",
+        "48 8B 05 ? ? ? ? 48 8B 88 D8 01 00 00",
+        "48 8B 0D ? ? ? ? 48 8B 89 D8 01 00 00",
+        "48 8B 0D ? ? ? ? 48 8B 91 D8 01 00 00",
+    )
+    GLOBAL_FALLBACK = 0xAA7B040
+    GLOBAL_TO_SYSTEM = 0x1D8
+    SYSTEM_TYPE = 0x18  # u32: the controller type to look for
+    SYSTEM_LIST = 0x08  # sentinel of a linked list of systems
+    NODE_ITEM = 0x10
+    ITEM_TYPE = 0xC0  # u16
+    MAX_NODES = 256
+    CURRENT = 0x2B0  # i32
+    PREVIOUS = 0x2B4  # i32
+    PENDING = 0x2B8  # u8, set last
+    OPTION = 0x2BC  # i32
+    FREE_ROAM = 9
+    DETAIL = 8  # the full-detail ("Homespace") mode
+
+
 class Render:
     """Entity -> render proxy -> model -> scene -> pose. The pose identifies this car's
     model instances among pooled and preview copies."""

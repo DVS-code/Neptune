@@ -115,6 +115,12 @@ class Vehicle:
         value = self.process.f32(self.engine + O.EngineModel.SPEED)
         return value * O.RAD_TO_RPM if value is not None else None
 
+    def set_engine_speed_rpm(self, rpm: float) -> bool:
+        """Set the engine's live speed. The physics carries on from it, so a written value holds
+        only while it keeps being written: used for the start-up rev blip, verified in game to
+        rev the engine without moving the car."""
+        return self.process.set_f32(self.engine + O.EngineModel.SPEED, float(rpm) / O.RAD_TO_RPM)
+
     @property
     def max_rpm(self) -> float | None:
         value = self.process.f32(self.car + O.Car.MAX_SPEED)

@@ -15,7 +15,7 @@ from neptune.ui.logreader import LogCompareWindow, LogReaderWindow
 from neptune.ui.widgets.buttons import Button, PrimaryButton
 from neptune.ui.widgets.card import Banner
 
-NOTE_EMPTY = "No saved .nlog files yet. Generate a log from the DYNO page while driving."
+NOTE_EMPTY = "No saved .nlog files yet. Use Generate Log above while driving to record one."
 
 
 class LogsModule(FeatureModule):

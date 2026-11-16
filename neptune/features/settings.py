@@ -29,6 +29,11 @@ HINT_ASSISTANT = "Use captured log evidence to suggest changes. Neptune never mo
 ISSUES_URL = "https://github.com/DVS-code/Neptune/issues"
 
 
+HINT_AIRRIDE_ENGINE = (
+    "Turning the engine off airs the suspension out, and starting it airs it back up. Needs "
+    "Suspension and Air ride switched on."
+)
+
 class SettingsModule(FeatureModule):
     name = "settings"
     title = "Settings"
@@ -165,6 +170,17 @@ class SettingsModule(FeatureModule):
         check_button = Button("Check for updates now")
         check_button.clicked.connect(self._check_now)
         startup_card.add(check_button)
+
+        vehicle_card = page.add_card("Vehicle")
+        follow = ToggleRow(
+            "Air ride follows the engine",
+            bool(self.settings.get("airride_follows_engine")),
+            hint=HINT_AIRRIDE_ENGINE,
+        )
+        follow.toggle.toggled_value.connect(
+            lambda value: self.settings.set("airride_follows_engine", bool(value))
+        )
+        vehicle_card.add(follow)
 
         input_card = page.add_card(
             "Controls",

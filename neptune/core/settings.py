@@ -33,6 +33,10 @@ DEFAULTS = {
     "dyno_enabled": False,
     "transmission_enabled": False,
     "lighting_enabled": False,
+    "animations_enabled": False,
+    "ignition_blip": True,
+    "ignition_blip_percent": 35.0,
+    "airride_follows_engine": False,
     # Lighting look (colours, fades, switches). Signals are never remembered.
     "lighting_state": {},
     "bindings": {},

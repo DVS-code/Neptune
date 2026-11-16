@@ -22,6 +22,7 @@ from neptune.core.models import CarIdentity, LogMetadata, NeptuneLog, Transmissi
 from neptune.core.transmission import gear_rows
 from neptune.features.boostgauge import BoostGaugeModule
 from neptune.features.dragy import DragyModule
+from neptune.features.logs import LogsModule
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.dynooverlay import DynoOverlay
@@ -77,7 +78,7 @@ class DynoModule(DragyModule):
 
     name = "dragy"  # Preserve the preset key used by earlier Neptune builds.
     title = "DYNO"
-    subtitle = "Power, torque, Dragy runs and boost."
+    subtitle = "Power, torque, Dragy runs, boost and saved logs."
     icon = "dragy.png"
     group = "Vehicle"
     order = 35
@@ -87,6 +88,8 @@ class DynoModule(DragyModule):
         self._registry = registry
         self._page = None
         self._boost = BoostGaugeModule(settings)
+        # Saved logs live on the DYNO page too, rather than as a separate nav item.
+        self._logs = LogsModule(settings, registry)
         self._dyno_enabled = bool(settings.get("dyno_enabled"))
         self._dyno_controls_dirty = False
         self._dyno_widgets: dict = {}
@@ -200,6 +203,8 @@ class DynoModule(DragyModule):
             self._capture_tick(vehicle)
 
     def _module(self, name: str):
+        if name == "logs":
+            return self._logs
         return self._registry.get(name) if self._registry is not None else None
 
     def _metadata(self, test_type: str, config: dict, sample_rate_hz: float = 0.0) -> LogMetadata:
@@ -864,6 +869,9 @@ class DynoModule(DragyModule):
         self._boost.build_page(page, container=boost_card)
 
         bind_progressive(enabled, *detail_cards)
+
+        # Saved logs open without the game, so they stay visible with DYNO switched off.
+        self._logs.build_page(page)
 
     def _set_show_torque(self, enabled: bool) -> None:
         self._show_torque = bool(enabled)

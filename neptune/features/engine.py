@@ -27,6 +27,7 @@ from neptune.features.cam import (
     CamController,
     apply_cam_shape,
 )
+from neptune.features.ignition import IgnitionController
 from neptune.features.launchcontrol import (
     LC_DEFAULT_MAX_NORM,
     LC_DEFAULT_MIN_NORM,
@@ -98,7 +99,9 @@ HINT_CAM_FREQUENCY = (
     f"How often the idle lope repeats. Adjustable from {CAM_IDLE_LOPE_MIN_HZ:.1f} to "
     f"{CAM_IDLE_LOPE_MAX_HZ:.1f} Hz; {CAM_IDLE_LOPE_DEFAULT_HZ:.1f} Hz is the tested default."
 )
-HINT_CAM_DEPTH = "Scales how far the live idle target falls and rises. 100% is the super-choppy profile."
+HINT_CAM_DEPTH = (
+    "Scales how far the live idle target falls and rises. 100% is the super-choppy profile."
+)
 HINT_CAM_TORQUE_DIP = "Scales the torque cut at the bottom of each cam pulse."
 HINT_CAM_RECOVERY = "Scales the torque recovery after each cam pulse."
 HINT_CAM_SHARPNESS = "Controls how abruptly the cam snaps between its drop and recovery."
@@ -199,6 +202,7 @@ class EngineModule(FeatureModule):
 
         self._process = None
         self._launch_control = LaunchControlController()
+        self._ignition = IgnitionController(settings, stock_idle=lambda: self._cam_idle_stock_rpm)
         self._lc_enabled = False
         self._lc_min_norm = LC_DEFAULT_MIN_NORM
         self._lc_max_norm = LC_DEFAULT_MAX_NORM
@@ -297,6 +301,11 @@ class EngineModule(FeatureModule):
                 "label": "Hold for enhanced launch control",
                 "description": "Hold while the game holds the revs, to build boost for the launch.",
             },
+            {
+                "key": "engine.ignition",
+                "label": "Engine on/off",
+                "description": "Switches the engine off and on.",
+            },
         ]
 
     def on_attach(self, vehicle) -> None:
@@ -327,6 +336,7 @@ class EngineModule(FeatureModule):
         self._controls_dirty = True
 
     def on_car_changed(self, vehicle) -> None:
+        self._ignition.on_car_changed()
         self._restore_cam_idle()
         self._engaged = False
         self._ready = False
@@ -373,6 +383,7 @@ class EngineModule(FeatureModule):
 
     def restore(self) -> None:
         vehicle = self.vehicle
+        self._ignition.restore(vehicle)
         self._restore_cam_idle()
         self._engaged = False
         self._ready = False
@@ -440,6 +451,7 @@ class EngineModule(FeatureModule):
 
     def tick(self, vehicle) -> None:
         self.vehicle = vehicle
+        self._ignition.tick(vehicle)
 
         if vehicle is None or not self.stock_curve:
             return
@@ -529,8 +541,10 @@ class EngineModule(FeatureModule):
         speed = vehicle.speed_ms
         if (
             rpm < LAUNCH_HANDOFF_MIN_RPM
-            or throttle is not None and throttle < LAUNCH_HANDOFF_MIN_THROTTLE
-            or speed is not None and speed > LAUNCH_HANDOFF_MAX_SPEED_MS
+            or throttle is not None
+            and throttle < LAUNCH_HANDOFF_MIN_THROTTLE
+            or speed is not None
+            and speed > LAUNCH_HANDOFF_MAX_SPEED_MS
         ):
             self._cancel_launch_handoff()
             return
@@ -712,12 +726,7 @@ class EngineModule(FeatureModule):
         """
         target = self._rev_limit
         vehicle = self.vehicle
-        if (
-            target is None
-            or vehicle is None
-            or len(curve) < MIN_CURVE_POINTS
-            or target <= 0.0
-        ):
+        if target is None or vehicle is None or len(curve) < MIN_CURVE_POINTS or target <= 0.0:
             return list(curve)
 
         per_index = float(vehicle.rpm_per_index or 100.0)
@@ -1057,6 +1066,7 @@ class EngineModule(FeatureModule):
             graph.clear_selection()
 
     def build_page(self, page) -> None:
+        self._ignition.build_card(page, self)
         curve_card = page.add_card(
             "Torque curve",
             "Drag to reshape. Right-drag to select a range, then drag any selected point "
@@ -1365,6 +1375,7 @@ class EngineModule(FeatureModule):
         live_card.add(banner)
 
     def refresh(self, vehicle) -> None:
+        self._ignition.refresh(vehicle)
         graph = self._widgets.get("graph")
         stats = self._widgets.get("stats")
         banner = self._widgets.get("banner")

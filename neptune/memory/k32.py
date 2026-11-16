@@ -810,3 +810,137 @@ def QueryFullProcessImageNameW(hProcess, dwFlags=0):
 
 def QueryFullProcessImageNameA(hProcess, dwFlags=0):
     return QueryFullProcessImageNameW(hProcess, dwFlags).encode("mbcs", "replace")
+
+
+# --------------------------------------------------------------------------- remote calls
+# Allocation, thread creation and waiting, used by neptune.memory.remote to run one short
+# call inside the game. Same ntdll-only approach as the rest of this module.
+
+MEM_COMMIT = 0x1000
+MEM_RESERVE = 0x2000
+MEM_RELEASE = 0x8000
+PAGE_READWRITE = 0x04
+PAGE_EXECUTE_READ = 0x20
+THREAD_ALL_ACCESS = 0x1FFFFF
+STATUS_TIMEOUT = 0x102
+
+
+class THREAD_BASIC_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("ExitStatus", NTSTATUS),
+        ("TebBaseAddress", wintypes.LPVOID),
+        ("ClientId", CLIENT_ID),
+        ("AffinityMask", ctypes.c_size_t),
+        ("Priority", wintypes.LONG),
+        ("BasePriority", wintypes.LONG),
+    ]
+
+
+ntdll.NtAllocateVirtualMemory.restype = NTSTATUS
+ntdll.NtAllocateVirtualMemory.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_size_t),
+    wintypes.ULONG,
+    wintypes.ULONG,
+]
+ntdll.NtFreeVirtualMemory.restype = NTSTATUS
+ntdll.NtFreeVirtualMemory.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.POINTER(ctypes.c_size_t),
+    wintypes.ULONG,
+]
+ntdll.NtCreateThreadEx.restype = NTSTATUS
+ntdll.NtCreateThreadEx.argtypes = [
+    ctypes.POINTER(wintypes.HANDLE),
+    wintypes.ULONG,
+    wintypes.LPVOID,
+    wintypes.HANDLE,
+    wintypes.LPVOID,
+    wintypes.LPVOID,
+    wintypes.ULONG,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    wintypes.LPVOID,
+]
+ntdll.NtWaitForSingleObject.restype = NTSTATUS
+ntdll.NtWaitForSingleObject.argtypes = [
+    wintypes.HANDLE,
+    wintypes.BOOLEAN,
+    ctypes.POINTER(ctypes.c_longlong),
+]
+ntdll.NtQueryInformationThread.restype = NTSTATUS
+ntdll.NtQueryInformationThread.argtypes = [
+    wintypes.HANDLE,
+    wintypes.ULONG,
+    wintypes.LPVOID,
+    wintypes.ULONG,
+    ctypes.POINTER(wintypes.ULONG),
+]
+ntdll.NtFlushInstructionCache.restype = NTSTATUS
+ntdll.NtFlushInstructionCache.argtypes = [wintypes.HANDLE, wintypes.LPVOID, ctypes.c_size_t]
+
+
+def VirtualAllocEx(hProcess, dwSize, flProtect=PAGE_READWRITE):
+    base = ctypes.c_void_p(0)
+    size = ctypes.c_size_t(dwSize)
+    status = ntdll.NtAllocateVirtualMemory(
+        hProcess, ctypes.byref(base), 0, ctypes.byref(size), MEM_COMMIT | MEM_RESERVE, flProtect
+    )
+    _nt_check(status)
+    return base.value
+
+
+def VirtualFreeEx(hProcess, lpAddress):
+    base = ctypes.c_void_p(lpAddress)
+    size = ctypes.c_size_t(0)
+    status = ntdll.NtFreeVirtualMemory(hProcess, ctypes.byref(base), ctypes.byref(size), MEM_RELEASE)
+    _nt_check(status)
+    return True
+
+
+def FlushInstructionCache(hProcess, lpAddress, dwSize):
+    _nt_check(ntdll.NtFlushInstructionCache(hProcess, ctypes.c_void_p(lpAddress), dwSize))
+    return True
+
+
+def CreateRemoteThread(hProcess, lpStartAddress, lpParameter=0):
+    thread = wintypes.HANDLE()
+    status = ntdll.NtCreateThreadEx(
+        ctypes.byref(thread),
+        THREAD_ALL_ACCESS,
+        None,
+        hProcess,
+        ctypes.c_void_p(lpStartAddress),
+        ctypes.c_void_p(lpParameter),
+        0,
+        0,
+        0,
+        0,
+        None,
+    )
+    _nt_check(status)
+    return thread
+
+
+def WaitForSingleObject(hHandle, milliseconds):
+    """True when the object signalled, False on timeout."""
+    timeout = ctypes.c_longlong(-int(milliseconds) * 10_000)  # relative, 100 ns units
+    status = ntdll.NtWaitForSingleObject(hHandle, False, ctypes.byref(timeout))
+    if status == STATUS_TIMEOUT:
+        return False
+    _nt_check(status)
+    return True
+
+
+def GetExitCodeThread(hThread):
+    info = THREAD_BASIC_INFORMATION()
+    length = wintypes.ULONG(0)
+    status = ntdll.NtQueryInformationThread(
+        hThread, 0, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(length)
+    )
+    _nt_check(status)
+    return info.ExitStatus & 0xFFFFFFFF
